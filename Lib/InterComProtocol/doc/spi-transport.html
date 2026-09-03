@@ -1,0 +1,753 @@
+<title>FXcursion SPI Transport</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Chivo:wght@400;600;700;900&family=Source+Serif+4:opsz,wght@8..60,400;8..60,600&family=JetBrains+Mono:wght@400;500;700&display=swap">
+
+<style>
+/* ============================================================
+   Two-hue stream coding is the whole information design: the
+   recorder is steel blue and the loop is burnt orange, in every
+   diagram, table and code block. You can trace one stream
+   through the document by colour alone.
+   ============================================================ */
+:root {
+  --ground:      #F6F7F9;
+  --surface:     #FFFFFF;
+  --surface-2:   #EFF2F5;
+  --ink:         #141A21;
+  --ink-2:       #48525C;
+  --ink-3:       #78838E;
+  --rule:        #DCE1E7;
+  --rule-soft:   #E9EDF1;
+
+  --rec:         #2C6E8F;
+  --rec-soft:    #DCEAF1;
+  --loop:        #C25A2B;
+  --loop-soft:   #F7E4D9;
+  --review:      #A8761A;
+  --review-soft: #FAF0DA;
+  --bad:         #A83232;
+  --fixed:       #2F7A55;
+  --fixed-soft:  #E2F1E8;
+
+  --shadow: 0 1px 2px rgba(20,26,33,.05), 0 10px 28px rgba(20,26,33,.06);
+
+  --disp: "Chivo", ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+  --body: "Source Serif 4", Georgia, "Times New Roman", serif;
+  --mono: "JetBrains Mono", ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --ground:      #12161A;
+    --surface:     #191E24;
+    --surface-2:   #212830;
+    --ink:         #E6EBF0;
+    --ink-2:       #A9B4BF;
+    --ink-3:       #7C8792;
+    --rule:        #2C343D;
+    --rule-soft:   #232A31;
+
+    --rec:         #6FB4D6;
+    --rec-soft:    #1B3644;
+    --loop:        #E5905F;
+    --loop-soft:   #402318;
+    --review:      #D9AC4E;
+    --review-soft: #34290F;
+    --bad:         #E07070;
+  --fixed:       #63BC8E;
+  --fixed-soft:  #14301F;
+
+    --shadow: 0 1px 2px rgba(0,0,0,.4), 0 10px 28px rgba(0,0,0,.3);
+  }
+}
+:root[data-theme="dark"] {
+  --ground:      #12161A;
+  --surface:     #191E24;
+  --surface-2:   #212830;
+  --ink:         #E6EBF0;
+  --ink-2:       #A9B4BF;
+  --ink-3:       #7C8792;
+  --rule:        #2C343D;
+  --rule-soft:   #232A31;
+
+  --rec:         #6FB4D6;
+  --rec-soft:    #1B3644;
+  --loop:        #E5905F;
+  --loop-soft:   #402318;
+  --review:      #D9AC4E;
+  --review-soft: #34290F;
+  --bad:         #E07070;
+  --fixed:       #63BC8E;
+  --fixed-soft:  #14301F;
+
+  --shadow: 0 1px 2px rgba(0,0,0,.4), 0 10px 28px rgba(0,0,0,.3);
+}
+
+* { box-sizing: border-box; }
+
+body {
+  background: var(--ground);
+  color: var(--ink);
+  font-family: var(--body);
+  font-size: 17px;
+  line-height: 1.65;
+  -webkit-font-smoothing: antialiased;
+}
+
+.page { max-width: 1120px; margin: 0 auto; padding: 0 32px 110px; }
+.col  { max-width: 68ch; }
+
+/* ---------- masthead ---------- */
+.mast { padding: 52px 0 28px; border-bottom: 2px solid var(--ink); margin-bottom: 40px; }
+.kicker {
+  font-family: var(--mono); font-size: 11px; letter-spacing: .18em;
+  text-transform: uppercase; color: var(--ink-3); margin: 0 0 18px;
+}
+h1 {
+  font-family: var(--disp); font-weight: 900;
+  font-size: clamp(40px, 6.5vw, 68px); line-height: .95;
+  letter-spacing: -.02em; margin: 0 0 20px; text-wrap: balance;
+}
+.deck { font-size: 20px; line-height: 1.5; color: var(--ink-2); max-width: 60ch; margin: 0; }
+
+/* ---------- structure ---------- */
+section { margin-top: 68px; }
+h2 {
+  font-family: var(--disp); font-weight: 700; font-size: 30px;
+  line-height: 1.12; letter-spacing: -.012em; margin: 0 0 4px; text-wrap: balance;
+}
+h2 .num {
+  font-family: var(--mono); font-size: 13px; font-weight: 500;
+  color: var(--ink-3); display: block; letter-spacing: .1em; margin-bottom: 8px;
+}
+h3 {
+  font-family: var(--disp); font-weight: 600; font-size: 15px;
+  letter-spacing: .08em; text-transform: uppercase; color: var(--ink-2);
+  margin: 40px 0 10px;
+}
+p { margin: 0 0 16px; }
+.lede { font-size: 19px; color: var(--ink-2); margin-bottom: 26px; }
+strong { font-weight: 600; }
+em.term { font-style: normal; font-family: var(--mono); font-size: .9em; }
+
+code, .m {
+  font-family: var(--mono); font-size: .855em;
+  font-variant-numeric: tabular-nums;
+}
+code {
+  background: var(--surface-2); border-radius: 3px; padding: .1em .35em;
+  color: var(--ink);
+}
+code.rec  { background: var(--rec-soft);  color: var(--rec); }
+code.loop { background: var(--loop-soft); color: var(--loop); }
+
+pre {
+  font-family: var(--mono); font-size: 13px; line-height: 1.6;
+  background: var(--surface); border: 1px solid var(--rule);
+  border-radius: 4px; padding: 16px 18px; overflow-x: auto;
+  margin: 0 0 18px; color: var(--ink-2);
+}
+pre b { color: var(--ink); font-weight: 700; }
+pre .r { color: var(--rec); }
+pre .l { color: var(--loop); }
+pre .c { color: var(--ink-3); }
+
+/* ---------- the frame diagram ---------- */
+.band { margin: 34px 0; }
+.frame-wrap {
+  background: var(--surface); border: 1px solid var(--rule);
+  border-radius: 4px; padding: 26px 26px 20px; box-shadow: var(--shadow);
+  overflow-x: auto;
+}
+.frame {
+  display: grid; grid-template-columns: 4fr 12fr; gap: 3px;
+  min-width: 560px; margin-bottom: 4px;
+}
+.grp { display: grid; gap: 3px; }
+.grp.r { grid-template-columns: repeat(4, 1fr); }
+.grp.l { grid-template-columns: repeat(12, 1fr); }
+.slot {
+  height: 46px; border-radius: 2px; display: flex;
+  align-items: center; justify-content: center;
+  font-family: var(--mono); font-size: 10px; font-weight: 500; color: #fff;
+}
+.slot.r { background: var(--rec); }
+.slot.l { background: var(--loop); }
+.frame-legend {
+  display: grid; grid-template-columns: 4fr 12fr; gap: 3px;
+  min-width: 560px; font-family: var(--disp); font-size: 12px;
+  font-weight: 600; letter-spacing: .07em; text-transform: uppercase;
+}
+.frame-legend span { padding-top: 8px; }
+.frame-legend .a { color: var(--rec); }
+.frame-legend .b { color: var(--loop); }
+.frame-note {
+  font-family: var(--mono); font-size: 11px; color: var(--ink-3);
+  margin-top: 14px; padding-top: 12px; border-top: 1px solid var(--rule-soft);
+  display: flex; flex-wrap: wrap; gap: 4px 28px;
+}
+
+/* ---------- tables ---------- */
+.tw { overflow-x: auto; margin: 6px 0 20px; }
+table { width: 100%; border-collapse: collapse; font-family: var(--disp); font-size: 14px; min-width: 560px; }
+caption {
+  text-align: left; font-family: var(--mono); font-size: 10.5px;
+  letter-spacing: .14em; text-transform: uppercase; color: var(--ink-3);
+  padding-bottom: 10px;
+}
+th {
+  text-align: left; font-weight: 700; font-size: 11.5px; letter-spacing: .09em;
+  text-transform: uppercase; color: var(--ink-3);
+  border-bottom: 1.5px solid var(--ink); padding: 0 16px 7px 0; white-space: nowrap;
+}
+td { padding: 9px 16px 9px 0; border-bottom: 1px solid var(--rule-soft); vertical-align: top; }
+tbody tr:last-child td { border-bottom: 0; }
+td.k { font-family: var(--mono); font-size: 12.5px; white-space: nowrap; color: var(--ink); }
+td.n, th.n { font-family: var(--mono); font-variant-numeric: tabular-nums; text-align: right; padding-right: 0; white-space: nowrap; }
+tr.rec td.k { color: var(--rec); }
+tr.loop td.k { color: var(--loop); }
+
+/* ---------- sequence ---------- */
+.seq { background: var(--surface); border: 1px solid var(--rule); border-radius: 4px; padding: 24px; box-shadow: var(--shadow); overflow-x: auto; }
+.seq svg { display: block; min-width: 620px; }
+
+/* ---------- review marks ---------- */
+.review {
+  background: var(--review-soft); border: 1px solid var(--review);
+  border-left-width: 4px; border-radius: 3px;
+  padding: 16px 20px; margin: 24px 0; max-width: 72ch;
+}
+.review .tag {
+  font-family: var(--disp); font-weight: 700; font-size: 11px;
+  letter-spacing: .13em; text-transform: uppercase; color: var(--review);
+  display: flex; align-items: center; gap: 10px; margin-bottom: 8px;
+}
+.review .tag .id {
+  font-family: var(--mono); font-weight: 500; background: var(--review);
+  color: var(--review-soft); padding: 1px 7px; border-radius: 2px; letter-spacing: .05em;
+}
+.review.crit { border-color: var(--bad); }
+.review.crit .tag { color: var(--bad); }
+.review.crit .tag .id { background: var(--bad); }
+
+/* Findings that have been acted on. Kept in place rather than deleted: the
+   reasoning is the useful part, and a fix with no record of what it fixed is
+   how the same mistake gets made again. */
+.review.fixed { background: var(--fixed-soft); border-color: var(--fixed); }
+.review.fixed .tag { color: var(--fixed); }
+.review.fixed .tag .id { background: var(--fixed); color: var(--fixed-soft); }
+.review p { margin: 0 0 10px; font-size: 16px; }
+.review p:last-child { margin-bottom: 0; }
+.review h4 {
+  font-family: var(--disp); font-weight: 700; font-size: 17px;
+  margin: 0 0 8px; letter-spacing: -.005em;
+}
+
+/* ---------- key/value strip ---------- */
+.strip {
+  display: grid; grid-template-columns: repeat(auto-fit, minmax(148px, 1fr));
+  border: 1px solid var(--rule); border-radius: 4px; overflow: hidden;
+  background: var(--surface); margin: 26px 0;
+}
+.strip div { padding: 13px 16px; border-right: 1px solid var(--rule); }
+.strip div:last-child { border-right: 0; }
+.strip dt {
+  font-family: var(--mono); font-size: 10px; letter-spacing: .12em;
+  text-transform: uppercase; color: var(--ink-3); margin-bottom: 3px;
+}
+.strip dd { margin: 0; font-family: var(--mono); font-size: 15px; font-weight: 500; font-variant-numeric: tabular-nums; }
+
+/* ---------- misc ---------- */
+.rule-hard { border: 0; border-top: 2px solid var(--ink); margin: 60px 0 0; }
+footer {
+  margin-top: 52px; padding-top: 20px; border-top: 1px solid var(--rule);
+  font-family: var(--mono); font-size: 11px; color: var(--ink-3); line-height: 1.9;
+}
+ul.tight { margin: 0 0 18px; padding-left: 22px; }
+ul.tight li { margin-bottom: 7px; }
+
+@media (max-width: 640px) {
+  .page { padding: 0 18px 70px; }
+  body { font-size: 16px; }
+}
+@media (prefers-reduced-motion: reduce) { * { animation: none !important; transition: none !important; } }
+:focus-visible { outline: 2px solid var(--loop); outline-offset: 2px; }
+</style>
+
+<div class="page">
+
+<header class="mast">
+  <p class="kicker">FXcursion · interface ↔ audio · SPI1</p>
+  <h1>One Wire,<br>Two Streams</h1>
+  <p class="deck">The recorder and the looper share a single SPI link that has no sync word, no length and no CRC. Everything that looks over-engineered in this code exists because of that one fact. Here is the whole protocol, and an honest list of what could be simpler.</p>
+</header>
+
+<div class="col">
+<p class="lede">The code looks bloated in places, and some of it was. Five findings are marked below; <strong>two have been fixed</strong> — including a defect that would have overrun a buffer by five times the first time a loop was saved — and three are judgement calls left in place with the reasoning recorded. Most of the remaining bulk is one constraint pushing outward, and it is worth seeing that constraint clearly before deciding what to cut.</p>
+</div>
+
+<!-- ============================================================= -->
+<section>
+<h2><span class="num">01</span>The constraint everything follows from</h2>
+
+<div class="col">
+<p>SPI1 carries a <strong>continuous, positionally framed stream</strong>. The audio board sends one frame per audio block, forever. The interface knows which sample belongs to which channel purely by <em class="term">counting</em> — slot 0 is channel 0 because it is the first word to arrive, not because anything says so.</p>
+
+<p>There is no sync word to resynchronise on, no length to validate, no CRC to fail. That makes it fast, and it makes it fragile in exactly one way:</p>
+
+<pre><b>Lose a single 32-bit word and every slot is permanently rotated.</b>
+The stream keeps flowing. The data keeps looking like audio.
+Every channel is in the wrong file from that moment on, and
+nothing in the payload can reveal it.</pre>
+
+<p>That is not a hypothetical. It is why three things in this design that each look like overkill are not:</p>
+
+<ul class="tight">
+  <li>The receive DMA is <strong>armed once and never re-armed</strong> — the gap between two transfers is precisely where a word goes missing.</li>
+  <li>The interface arms its routing <strong>before</strong> the audio board is told to start, and the audio board is told to stop <strong>before</strong> the routing is torn down.</li>
+  <li>Loop data cannot have its own SPI transaction, because starting one would mean re-arming. It has to ride inside the recorder's frames.</li>
+</ul>
+</div>
+</section>
+
+<!-- ============================================================= -->
+<section>
+<h2><span class="num">02</span>The frame</h2>
+
+<div class="col">
+<p class="lede">This is the entire protocol in one picture. Everything else is machinery to build it, take it apart, and agree on how wide it is.</p>
+</div>
+
+<div class="band">
+<div class="frame-wrap">
+  <div class="frame">
+    <div class="grp r">
+      <div class="slot r">ch0</div><div class="slot r">ch1</div><div class="slot r">ch2</div><div class="slot r">ch3</div>
+    </div>
+    <div class="grp l">
+      <div class="slot l">L0</div><div class="slot l">L1</div><div class="slot l">L2</div><div class="slot l">L3</div>
+      <div class="slot l">L4</div><div class="slot l">L5</div><div class="slot l">L6</div><div class="slot l">L7</div>
+      <div class="slot l">L8</div><div class="slot l">L9</div><div class="slot l">L10</div><div class="slot l">L11</div>
+    </div>
+  </div>
+  <div class="frame-legend">
+    <span class="a">Recorder — always present</span>
+    <span class="b">Loop — only while a transfer runs</span>
+  </div>
+  <div class="frame-note">
+    <span>1 slot = one 32-bit word</span>
+    <span>1 frame = 1 sample period</span>
+    <span>64 frames = 1 audio block = 1333 µs</span>
+    <span>total width 16 — divides the receive half</span>
+    <span>SCK 96 MHz</span>
+  </div>
+</div>
+</div>
+
+<div class="col">
+<p>The frame is <code class="rec">REC_SLOT_QTY</code> recorder slots followed by <code class="loop">nSlotQty</code> loop slots. When no loop is moving the frame is <strong>four slots wide</strong>; during a transfer it <strong>widens</strong> to sixteen, and narrows again when the transfer ends.</p>
+
+<p><strong>Sixteen, and not any number you like.</strong> The receiver's ring is a fixed count of words and its half-transfer interrupt fires at the halfway word, so the total width has to divide that half exactly — otherwise the boundary lands mid-frame and everything after it is rotated. At 4096 words per half the legal widths are 8, 16 and 32. Sixteen is the middle one.</p>
+
+<p>The two halves are read completely differently, and that difference explains most of the code:</p>
+</div>
+
+<div class="tw col" style="max-width:none">
+<table>
+  <caption>The same wire, two meanings</caption>
+  <thead><tr><th>&nbsp;</th><th>Recorder slots</th><th>Loop slots</th></tr></thead>
+  <tbody>
+    <tr>
+      <td class="k">what a slot is</td>
+      <td>a <strong>channel</strong>. Slot 2 is always channel 2.</td>
+      <td>four bytes of an undifferentiated <strong>byte stream</strong>.</td>
+    </tr>
+    <tr>
+      <td class="k">payload per slot</td>
+      <td>3 bytes — a 24-bit sample, top byte padding</td>
+      <td><strong>4 bytes</strong> — every byte used</td>
+    </tr>
+    <tr>
+      <td class="k">why the difference</td>
+      <td>the receiver de-interleaves by position, so a sample must sit in a known slot</td>
+      <td>one contiguous run; sample boundaries inside it matter to nothing until the WAV header is written</td>
+    </tr>
+    <tr>
+      <td class="k">destination</td>
+      <td>four separate SDRAM planes</td>
+      <td>one contiguous staging buffer</td>
+    </tr>
+    <tr>
+      <td class="k">MDMA routes</td>
+      <td>4 — one per plane</td>
+      <td><strong>1</strong> — the run is lifted whole</td>
+    </tr>
+    <tr>
+      <td class="k">slots per frame</td>
+      <td>4, always</td>
+      <td>12, only while a transfer runs</td>
+    </tr>
+  </tbody>
+</table>
+</div>
+
+<div class="col">
+<p>That last row is load-bearing. The MDMA offers <strong>five routes</strong> — one channel plus four linked-list nodes. Four are spoken for by the recorder planes. Sixteen loop slots as sixteen routes would not have fitted; as one contiguous run, it does. <em>That</em> is why the loop slots are grouped at the end of the frame rather than interleaved among the recorder's.</p>
+</div>
+</section>
+
+<!-- ============================================================= -->
+<section>
+<h2><span class="num">03</span>One audio block, end to end</h2>
+
+<div class="col">
+<p class="lede">Every 1333 µs, this happens. Follow the colour: blue is the recorder's path, orange is the loop's.</p>
+</div>
+
+<div class="band seq">
+<svg viewBox="0 0 900 372" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Timeline of one audio block across both controllers">
+  <defs>
+    <marker id="ar" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto">
+      <path d="M0,0 L10,5 L0,10 z" fill="currentColor"/>
+    </marker>
+  </defs>
+
+  <!-- lanes -->
+  <text x="0" y="16" font-family="Chivo, sans-serif" font-size="12" font-weight="700" fill="currentColor" letter-spacing="1.2">AUDIO CONTROLLER</text>
+  <text x="0" y="238" font-family="Chivo, sans-serif" font-size="12" font-weight="700" fill="currentColor" letter-spacing="1.2">INTERFACE CONTROLLER</text>
+
+  <line x1="0" y1="176" x2="900" y2="176" stroke="currentColor" stroke-opacity=".18" stroke-width="1" stroke-dasharray="3 4"/>
+  <text x="898" y="171" text-anchor="end" font-family="JetBrains Mono, monospace" font-size="10" fill="currentColor" fill-opacity=".45">SPI1 · 96 MHz · MOSI + MISO</text>
+
+  <!-- audio steps -->
+  <g font-family="JetBrains Mono, monospace" font-size="10.5">
+    <rect x="0" y="30" width="176" height="42" rx="3" fill="var(--rec-soft)" stroke="var(--rec)"/>
+    <text x="10" y="47" fill="var(--rec)">Recorder_GetStream()</text>
+    <text x="10" y="62" fill="var(--rec)" font-size="9.5" fill-opacity=".8">4 planes × 64 frames</text>
+
+    <rect x="192" y="30" width="196" height="42" rx="3" fill="var(--rec-soft)" stroke="var(--rec)"/>
+    <text x="202" y="47" fill="var(--rec)">RecStream_Stage(w)</text>
+    <text x="202" y="62" fill="var(--rec)" font-size="9.5" fill-opacity=".8">writes at stride w, zeroes rest</text>
+
+    <rect x="404" y="30" width="196" height="42" rx="3" fill="var(--loop-soft)" stroke="var(--loop)"/>
+    <text x="414" y="47" fill="var(--loop)">LoopXfer_Block()</text>
+    <text x="414" y="62" fill="var(--loop)" font-size="9.5" fill-opacity=".8">fills slots 4…w, 4 B each</text>
+
+    <rect x="616" y="30" width="180" height="42" rx="3" fill="var(--surface-2)" stroke="currentColor" stroke-opacity=".3"/>
+    <text x="626" y="47" fill="currentColor">SPI_TP_SendFrame()</text>
+    <text x="626" y="62" fill="currentColor" font-size="9.5" fill-opacity=".6">one DMA burst</text>
+  </g>
+
+  <!-- flow arrows top lane -->
+  <g stroke="currentColor" stroke-opacity=".35" fill="none" color="currentColor">
+    <path d="M176,51 L188,51" marker-end="url(#ar)"/>
+    <path d="M388,51 L400,51" marker-end="url(#ar)"/>
+    <path d="M600,51 L612,51" marker-end="url(#ar)"/>
+  </g>
+
+  <!-- the wire -->
+  <g>
+    <path d="M706,76 L706,150" stroke="var(--rec)" stroke-width="2" fill="none" marker-end="url(#ar)" color="var(--rec)"/>
+    <text x="716" y="118" font-family="JetBrains Mono, monospace" font-size="10" fill="var(--rec)">MOSI · one frame per block</text>
+  </g>
+  <g>
+    <path d="M150,202 L150,150" stroke="var(--loop)" stroke-width="2" fill="none" marker-end="url(#ar)" color="var(--loop)" stroke-dasharray="4 3"/>
+    <text x="160" y="140" font-family="JetBrains Mono, monospace" font-size="10" fill="var(--loop)">MISO · only during a LOAD</text>
+  </g>
+
+  <!-- interface steps -->
+  <g font-family="JetBrains Mono, monospace" font-size="10.5">
+    <rect x="616" y="252" width="180" height="42" rx="3" fill="var(--surface-2)" stroke="currentColor" stroke-opacity=".3"/>
+    <text x="626" y="269" fill="currentColor">circular DMA ring</text>
+    <text x="626" y="284" fill="currentColor" font-size="9.5" fill-opacity=".6">never re-armed</text>
+
+    <rect x="380" y="252" width="216" height="42" rx="3" fill="var(--surface-2)" stroke="currentColor" stroke-opacity=".3"/>
+    <text x="390" y="269" fill="currentColor">MDMA_Trigger_Deinterleave</text>
+    <text x="390" y="284" fill="currentColor" font-size="9.5" fill-opacity=".6">5 routes, by position</text>
+
+    <rect x="196" y="252" width="164" height="42" rx="3" fill="var(--rec-soft)" stroke="var(--rec)"/>
+    <text x="206" y="269" fill="var(--rec)">recorder[4][…]</text>
+    <text x="206" y="284" fill="var(--rec)" font-size="9.5" fill-opacity=".8">4 planes, 5.46 s ring</text>
+
+    <rect x="0" y="252" width="176" height="42" rx="3" fill="var(--loop-soft)" stroke="var(--loop)"/>
+    <text x="10" y="269" fill="var(--loop)">staging slot A / B</text>
+    <text x="10" y="284" fill="var(--loop)" font-size="9.5" fill-opacity=".8">5.5 MiB each</text>
+  </g>
+
+  <g stroke="currentColor" stroke-opacity=".35" fill="none" color="currentColor">
+    <path d="M616,273 L604,273" marker-end="url(#ar)"/>
+    <path d="M380,273 L368,273" marker-end="url(#ar)"/>
+    <path d="M196,273 L184,273" marker-end="url(#ar)"/>
+  </g>
+
+  <!-- footer note -->
+  <text x="0" y="330" font-family="JetBrains Mono, monospace" font-size="10" fill="currentColor" fill-opacity=".5">The de-interleave splits one arriving frame into five destinations by SLOT POSITION alone.</text>
+  <text x="0" y="348" font-family="JetBrains Mono, monospace" font-size="10" fill="currentColor" fill-opacity=".5">Nothing in the data says which is which — that is the whole bargain.</text>
+  <text x="0" y="366" font-family="JetBrains Mono, monospace" font-size="10" fill="var(--loop)" fill-opacity=".85">A LOAD runs the orange path backwards: LoopSession_FillTx writes MISO, LoopXfer_Block unpacks.</text>
+</svg>
+</div>
+</section>
+
+<!-- ============================================================= -->
+<section>
+<h2><span class="num">04</span>What each piece is for</h2>
+
+<div class="col">
+<p class="lede">You said you don't know why <code>loop_xfer</code> has the functions it has, or what a "spool" is. Here is every module on the path, and the one job it exists to do.</p>
+</div>
+
+<h3>Audio controller — the sender</h3>
+<div class="tw">
+<table>
+  <caption>Modules on the audio side</caption>
+  <thead><tr><th>Module</th><th>Its one job</th><th>Why it is separate</th></tr></thead>
+  <tbody>
+    <tr class="rec"><td class="k">rec_stream.c</td>
+      <td>Hold two staged frames — one going out, one being filled.</td>
+      <td>The DMA reads one while the audio block writes the other. Without two, a block would be written into the buffer being transmitted, splicing two blocks into one.</td></tr>
+    <tr class="rec"><td class="k">rec_spi.c</td>
+      <td>Ask how wide the frame is, stage the recorder samples, let the loop fill the rest, hand it to the transport.</td>
+      <td>It is the only place that knows about both streams. Everything either side of it knows about exactly one.</td></tr>
+    <tr class="loop"><td class="k">loop_xfer.c</td>
+      <td>Turn a loop in SDRAM into bytes in slots, and back.</td>
+      <td>This is the answer to "why does it have those functions". It is a <em>codec</em>, not a manager: <code>OnOpen</code> and <code>OnCtl</code> answer the two protocol messages, <code>StreamWidth</code> reports how wide the frame must be, <code>Block</code> moves one block's worth. Four entry points, one per thing that can happen to it.</td></tr>
+    <tr class="loop"><td class="k">loop_mem.c</td>
+      <td>Own the loop buffers and a one-block DTCM window onto them.</td>
+      <td>The window survives because the loop <em>wraps</em>: a block straddling the loop end is two runs in memory, and every caller handling that itself is how a click at the loop point appears at some lengths and not others.</td></tr>
+    <tr><td class="k">SPI_TP</td>
+      <td>Own the peripheral, the clock and the DMA.</td>
+      <td>The link speed lives in <code>spi_tp_cfg.h</code>, not in whatever CubeMX last generated.</td></tr>
+  </tbody>
+</table>
+</div>
+
+<h3>Interface controller — the receiver</h3>
+<div class="tw">
+<table>
+  <caption>Modules on the interface side</caption>
+  <thead><tr><th>Module</th><th>Its one job</th><th>Why it is separate</th></tr></thead>
+  <tbody>
+    <tr class="rec"><td class="k">Recorder.c</td>
+      <td>Programme the MDMA routes and own the ring.</td>
+      <td>Also owns the loop <em>route</em> — because the route is part of the same de-interleave, not a separate transfer.</td></tr>
+    <tr class="loop"><td class="k">LoopSession.c</td>
+      <td>Run the transfer: negotiate, arm, watch, verify, hand over.</td>
+      <td>The mirror of <code>loop_xfer.c</code>. Both run the same shared state machine, so a protocol change is a compile error on both ends rather than a transfer that stalls.</td></tr>
+    <tr class="loop"><td class="k">LoopSpool.c</td>
+      <td><strong>The "spool".</strong> Two staging slots, a queue, and the SD card.</td>
+      <td>Named for what it does: it <em>spools</em> loops between memory and the card, like a print spooler. A loop lands in a slot at link speed; the card takes it later, at card speed. The two rates are unrelated, and the slot is what decouples them.</td></tr>
+    <tr><td class="k">SPI_TP</td>
+      <td>Same service, compiled as slave.</td>
+      <td>One file, two roles. A master divides its kernel to reach SCK; a slave takes SCK off the wire and only has to sample it.</td></tr>
+  </tbody>
+</table>
+</div>
+
+<h3>Shared — compiled into both</h3>
+<div class="tw">
+<table>
+  <caption>InterComProtocol, one copy via the SystemSW submodule</caption>
+  <thead><tr><th>File</th><th>Its one job</th></tr></thead>
+  <tbody>
+    <tr><td class="k">fx_loop.c</td><td>The session state machine. <strong>Both boards run this same code</strong>, which is why a byte count is wrong on both or on neither.</td></tr>
+    <tr><td class="k">fx_interleave.c</td><td>Frame geometry: given a slot, a width and a stream width, where are those bytes and how far apart. The one place the layout is computed.</td></tr>
+    <tr><td class="k">fx_crc.c</td><td><code>Crc32_Ieee</code> — the ordinary CRC32, so a saved loop can be checked with a desktop tool.</td></tr>
+    <tr><td class="k">fx_protocol.h</td><td>The three loop commands and their payloads, size-pinned so a padding difference is a build error.</td></tr>
+  </tbody>
+</table>
+</div>
+</section>
+
+<!-- ============================================================= -->
+<section>
+<h2><span class="num">05</span>The numbers</h2>
+
+<dl class="strip">
+  <div><dt>SCK</dt><dd>96 MHz</dd></div>
+  <div><dt>Frame, idle</dt><dd>4 slots</dd></div>
+  <div><dt>Frame, transfer</dt><dd>16 slots</dd></div>
+  <div><dt>Burst / block</dt><dd>26 %</dd></div>
+  <div><dt>Loop rate</dt><dd>2.30 MB/s</dd></div>
+  <div><dt>One loop</dt><dd>2.50 s</dd></div>
+</dl>
+
+<div class="col">
+<p>The burst must <strong>finish inside the block</strong>, or the next block has nowhere to go and is dropped — silently, in both the recording and the loop. That is the entire reason for 96 MHz rather than 48:</p>
+</div>
+
+<pre>frame width          <span class="c">48 MHz    96 MHz</span>   <span class="c">share of the 1333 µs block</span>
+ 4  <span class="r">recorder only</span>       13%        6%     <span class="c">divides the half</span>
+ 8  <span class="r">4</span>+<span class="l">4 loop</span>            26%       13%     <span class="c">divides the half</span>
+16  <span class="r">4</span>+<span class="l">12 loop</span>           <b>51%</b>       <b>26%</b>     <span class="c">divides the half — in use</span>
+32  <span class="r">4</span>+<span class="l">28 loop</span>          102%       51%     <span class="c">divides, but 48 MHz cannot fit it</span></pre>
+
+<div class="col">
+<p>51% sustained for the seconds a transfer lasts is not a margin, it is a cliff — and it coincides with the DSP at full tilt and both SDRAM banks serving a looper alongside delay or reverb. At 96 MHz the same frame leaves three quarters of every block free.</p>
+
+<p>Notice that the width column is not a free choice: only 8, 16 and 32 appear because those are the widths that divide the receiver's 4096-word half. 20 and 24 are missing because they do not, and a frame that does not divide puts the half-transfer interrupt in the middle of a frame.</p>
+</div>
+</section>
+
+<!-- ============================================================= -->
+<section>
+<h2><span class="num">06</span>Saving a loop, in order</h2>
+
+<div class="col">
+<p class="lede">Nine steps. The ordering constraints are the interesting part — three of them are not negotiable.</p>
+</div>
+
+<pre><span class="c">GUI</span>        LoopSession_StartSave(looper, planes, name)
+             │
+  <b>1</b>          ├─ LoopSpool_Acquire()          <span class="c">take slot A or B, or refuse</span>
+  <b>2</b>          ├─ Recorder_ArmLoopDest()       <span class="c">← ARM BEFORE ASKING</span>
+  <b>3</b>          └─ LOOP_OPEN ────────────────────────────────────▶ <span class="c">UART</span>
+                                                     │
+  <b>4</b>                          LoopXfer_OnOpen()  ◀─┘  <span class="c">how long is the take?</span>
+  <b>5</b>          ◀──────────────────────────────── LOOP_STAT(READY, bytes, slots)
+             │
+  <b>6</b>          ├─ FxLoop_OpenReply()           <span class="c">both sides now agree on the size</span>
+  <b>7</b>          └─ LOOP_CTL(START) ──────────────────────────────▶
+                                                     │
+  <b>8</b>                            <span class="l">the frame widens; blocks flow</span>
+             ◀════════════ <span class="l">MOSI, 12 loop slots per frame</span> ═════════
+             │
+  <b>9</b>          ◀──────────────────────────────── LOOP_STAT(COMPLETE, crc)
+             │
+             └─ LoopSession_Poll()
+                 ├─ wait for <b>both</b>: bytes landed AND peer reported
+                 ├─ Crc32_Ieee(staging) == peer crc ?
+                 ├─ Recorder_DisarmLoopDest()
+                 └─ LoopSpool_Commit()  <span class="c">→ queued for the card</span></pre>
+
+<div class="col">
+<h3>The three orderings that matter</h3>
+
+<p><strong>Arm before asking (step 2).</strong> The route is in place before any possibility of a block. A block arriving with nothing routed is not recoverable — there is no framing to notice it with, and the loop would simply be missing bytes from its middle.</p>
+
+<p><strong>Disarm before narrowing (step 9).</strong> The reverse. While the route is armed it keeps writing whatever the wire leaves in slots the audio board has already stopped filling.</p>
+
+<p><strong>Wait for both conditions.</strong> The interface knows its byte count is satisfied; the audio board knows it sent everything. Waiting on the local count alone would run the CRC comparison against a value that had not arrived yet. Waiting on the report alone would checksum a staging slot the MDMA had not finished filling.</p>
+</div>
+
+<div class="review">
+  <div class="tag"><span class="id">R1</span> could be simpler</div>
+  <h4>Two modules where one might do</h4>
+  <p><code>LoopSpool</code> and <code>LoopSession</code> are separate because one owns the card and the other owns the wire. That is a real seam — the spool's queue and recorder-priority logic have nothing to do with the protocol — but it costs two headers, two init calls and a shared <code>nSlot</code> that both touch.</p>
+  <p><strong>If you merge them</strong>, you lose the ability to test the card side without a link, which is currently possible. I would keep the split, but the criticism is fair and the cost is real. If it stays, <code>nSlot</code> ownership should move entirely into the spool with the session asking for it by handle.</p>
+</div>
+</section>
+
+<!-- ============================================================= -->
+<section>
+<h2><span class="num">07</span>The card, and who gets it</h2>
+
+<div class="col">
+<p class="lede">The recorder writes four WAVs continuously. A loop save wants the same card. A card handles one sequential stream far better than two interleaved, so they take turns — and the turn order is deliberately not first-come.</p>
+</div>
+
+<pre>loop A writes  ──────────────▶ <b>done</b>
+                                 │
+recorder waits, ring filling ────┤  <span class="c">backlog: ~3 MB of a 50 MB ring</span>
+                                 ▼
+                          <b>RECORDER GOES NEXT</b>   <span class="c">even though loop B is queued</span>
+                                 │
+                        catches up at ~4× real time
+                                 │
+                                 ▼
+loop B starts immediately  ────────────────────▶
+
+<b>LoopSpool_IsBusy() stays TRUE across all of it.</b>
+It never blinks false in the gaps.</pre>
+
+<div class="col">
+<p>The recorder goes next because it has been locked out for seconds and is carrying a backlog. Putting a second loop ahead of it is how a backlog becomes an <em>overrun</em>, and overrun audio is gone. The loop is already safely in SDRAM; the recorder's backlog is not.</p>
+
+<p>The busy flag staying true is what makes the "saving" indicator honest, and it is also the gate: <code>LoopSpool_Load</code> returns <code>RESULT_BUSY</code> during that whole window rather than queueing, because a read starting mid-recovery locks the recorder out a second time before it has cleared the first.</p>
+</div>
+
+<div class="review">
+  <div class="tag"><span class="id">R2</span> worth measuring</div>
+  <h4>The CRC and the packing both sit in the audio block</h4>
+  <p>Per block, with a transfer running, the audio side spends roughly <strong>2.6–5%</strong> of its budget on the CRC over 4096 loop bytes, plus the window copies. That is affordable. It is listed because it is <em>invisible</em> — nothing reports it, and it only appears when a loop transfer coincides with a heavy patch.</p>
+  <p><strong>Worth doing:</strong> put the block's worst-case cycle count on the debug UART. You already have <code>DWT-&gt;CYCCNT</code> sampled in <code>ProcessHalf</code>.</p>
+</div>
+</section>
+
+<!-- ============================================================= -->
+<section>
+<h2><span class="num">08</span>Review findings</h2>
+
+<div class="col">
+<p class="lede">Five things. <strong>R3 and R4 are fixed</strong> — they are kept here rather than deleted, because a fix with no record of what it fixed is how the same mistake gets made twice. R5 to R7 are judgement calls where the current shape is defensible but the cost is real.</p>
+</div>
+
+<div class="review fixed">
+  <div class="tag"><span class="id">R3</span> defect · fixed</div>
+  <h4>The receive ring was sized for a four-slot frame only</h4>
+  <p>The ring is <code>REC_RX_WORDS</code> = 8192 <em>words</em>, and the de-interleave was told <code>REC_RX_HALF_FRAMES</code> = 1024 <em>frames</em> unconditionally. Correct at four slots per frame, wrong at every other width:</p>
+<pre>half = 4096 words
+
+ at  4 slots/frame  →  1024.0 frames   <b>OK</b>
+ at 20 slots/frame  →   204.8 frames   <b>not even a whole number</b>
+
+it would have read 1024 × 20 × 4 = <b>81,920 B</b>
+from a half that holds <b>16,384 B</b></pre>
+  <p>A five-times overrun into whatever follows the ring, the first time a loop was saved. <code>LoopSession_FillTx</code>'s half offset had the same bug.</p>
+  <p><strong>What changed.</strong> Frames-per-half is now derived from the width, the width must divide the half, and an illegal width is refused rather than clamped:</p>
+<pre><b>REC_RX_HALF_WORDS</b>       (REC_RX_WORDS / 2)
+<b>REC_FRAMES_PER_HALF</b>(w)  (REC_RX_HALF_WORDS / (w))
+<b>REC_WIDTH_IS_LEGAL</b>(w)   (REC_RX_HALF_WORDS % (w) == 0)</pre>
+  <p>4096 divides by 8, 16 and 32 but not by 20, so <code>FX_LOOP_SLOT_QTY_MAX</code> went from 16 to <strong>12</strong> — total width 16, 256 frames per half. It costs 2.5 s per loop instead of 1.88.</p>
+  <p>Two static asserts now pin the divisibility at build time, and <code>MDMA_Trigger_Deinterleave</code> refuses an ACKed width it cannot de-interleave, counting it in <code>recDeinterleaveRefused</code> rather than recording plausible audio from the wrong channels.</p>
+</div>
+
+<div class="review fixed">
+  <div class="tag"><span class="id">R4</span> real cost · fixed</div>
+  <h4><code>LoopXfer_At()</code> did two divisions per payload byte</h4>
+  <p>It converted a byte offset into a plane index and an offset within that plane, with a <code>/</code> and a <code>%</code>, once per byte:</p>
+<pre>4096 payload bytes per block  →  <b>8192 divisions per block</b>
+
+at ~10 cycles each  =  81,920 cycles
+block budget        = 639,840 cycles      <b>≈ 13%</b></pre>
+  <p>Thirteen percent of the audio block spent on address arithmetic, for a pointer that almost always just advances by one. The plane boundary is crossed <em>once</em> in a multi-megabyte loop.</p>
+  <p><strong>What changed.</strong> A walking pointer: <code>pWalk</code> and <code>nWalkRemain</code>, both advanced by one per byte, with the plane step taken only when the countdown reaches zero. The divide-and-modulo now happens <strong>once per block</strong> to re-derive the pointer from <code>nByteOfs</code> — which also means a session reset between blocks cannot leave a stale pointer behind.</p>
+<pre>divisions per block   8192  →  <b>2</b></pre>
+  <p><code>LoopXfer_At</code> survives for the CRC span, where it runs at most twice per block.</p>
+</div>
+
+<div class="review">
+  <div class="tag"><span class="id">R5</span> defensible · but you were right to notice</div>
+  <h4>The routes are rebuilt from scratch every block</h4>
+  <p><code>MDMA_Trigger_Deinterleave</code> recomputes all five routes and runs <code>FxInterleave_Xfer</code>'s full validation on each, every 1333 µs. Four of those five never change while the stream width is constant.</p>
+  <p><strong>Why it is defensible:</strong> the validation is what refuses a geometry that would read past the frame, and it is cheap next to the transfer itself. Caching it means a cache to invalidate, and the thing that would invalidate it — a width change — is exactly the moment you least want a stale descriptor.</p>
+  <p><strong>If you want it faster:</strong> compute once when the ACK arrives and again when the width changes, and keep a validity flag. The saving is real but small; the risk is a stale route, which is the failure this whole design is arranged to avoid. I would leave it.</p>
+</div>
+
+<div class="review">
+  <div class="tag"><span class="id">R6</span> smell · justified, but flag it</div>
+  <h4><code>RecStream_StageSlots()</code> hands out a writable pointer</h4>
+  <p><code>RecStream_Buffer</code> returns <code>const</code> because nothing outside that module should write a staged block. <code>StageSlots</code> exists to break exactly that rule, so the loop transport can fill its slots in place.</p>
+  <p>The alternative is a second 5 KiB buffer and a copy per block. That is worse. But the const-breaking function is a genuine smell and should stay narrow: it is valid only for the half <code>Stage</code> just returned, and only before the transport starts. Nothing enforces that today.</p>
+  <p><strong>Cheap hardening:</strong> have <code>Stage</code> return the writable pointer directly instead of an index, so there is no window in which a stale index can be passed.</p>
+</div>
+
+<div class="review">
+  <div class="tag"><span class="id">R7</span> not bloat — keep</div>
+  <h4>Things that look redundant and are not</h4>
+  <p><strong>Two staging halves on the audio side.</strong> One in flight, one filling. With one, a block would be written into the buffer the DMA is reading.</p>
+  <p><strong>The DTCM window in <code>loop_mem</code>.</strong> Looks like a leftover from the PSRAM design. It is not: it handles the loop wrap in one place, and DTCM is zero-wait where SDRAM costs a row activate per sample.</p>
+  <p><strong>Zeroing the loop slots when no transfer runs.</strong> Without it a finished transfer's last block stays in the staging buffer and the next frame carries stale audio in slots the interface is still routing.</p>
+  <p><strong>Two CRCs.</strong> They are over different memories — the sender's looper and the receiver's staging. Comparing them is the only check on a link that carries no CRC of its own.</p>
+</div>
+</section>
+
+<hr class="rule-hard">
+
+<footer>
+FXcursion · SPI1 transport reference · SystemSW/Lib/InterComProtocol/doc · 04.09.2026<br>
+Frame arithmetic at 48 kHz, 64 frames per audio block, 32-bit slots throughout.<br>
+R3 and R4 fixed and verified against the host suite; R5–R7 recorded so the reasoning is not lost.
+</footer>
+
+</div>
