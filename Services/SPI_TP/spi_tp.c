@@ -119,8 +119,9 @@
 * Definitions of local (private) variables
 ***************************************************************************************************/
 
-static SPI_TP_HalfCallback pfHalfCb = NULL_PTR;
-static SPI_TP_SentCallback pfSentCb = NULL_PTR;
+static SPI_TP_HalfCallback  pfHalfCb  = NULL_PTR;
+static SPI_TP_SentCallback  pfSentCb  = NULL_PTR;
+static SPI_TP_ErrorCallback pfErrorCb = NULL_PTR;
 
 static SPI_TP_STATS tStats;
 
@@ -190,6 +191,14 @@ STD_RESULT SPI_TP_RegisterHalfCb(const SPI_TP_HalfCallback pfCb)
 STD_RESULT SPI_TP_RegisterSentCb(const SPI_TP_SentCallback pfCb)
 {
     pfSentCb = pfCb;
+
+    return RESULT_OK;
+}
+
+
+STD_RESULT SPI_TP_RegisterErrorCb(const SPI_TP_ErrorCallback pfCb)
+{
+    pfErrorCb = pfCb;
 
     return RESULT_OK;
 }
@@ -405,8 +414,12 @@ void HAL_SPI_ErrorCallback(SPI_HandleTypeDef* hspi)
      * word alignment, and restarting the DMA would resume it rotated - reading
      * plausible data into the wrong channels for as long as it runs. Recovery
      * has to go back through the arm-then-start handshake, which only the
-     * application can sequence, so this counts the error and stops.
+     * application can sequence, so this counts the error, stops, and tells it.
      */
+    if (pfErrorCb != NULL_PTR)
+    {
+        pfErrorCb();
+    }
 }
 
 #endif  // #if (SPI_TP_IN_USE == ON)

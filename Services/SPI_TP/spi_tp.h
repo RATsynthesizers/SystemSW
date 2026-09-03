@@ -113,6 +113,18 @@ typedef void (*SPI_TP_HalfCallback)(const BOOLEAN bSecondHalf);
 typedef void (*SPI_TP_SentCallback)(void);
 
 /**
+ * @brief Called on a peripheral error - overrun, mode fault, CRC.
+ *
+ * The transport does NOT recover by itself, and this is why the callback
+ * exists. A positionally framed stream that has errored has almost certainly
+ * lost word alignment, so restarting the DMA would resume it rotated - reading
+ * plausible data into the wrong channels for as long as it runs. Only the
+ * application knows how to sequence the arm-then-start handshake that puts it
+ * back, so the transport counts the error, stops, and tells whoever asked.
+ */
+typedef void (*SPI_TP_ErrorCallback)(void);
+
+/**
  * @brief Transport counters. All should stay at zero on a healthy link.
  */
 typedef struct stSPI_TP_STATS
@@ -193,6 +205,9 @@ extern STD_RESULT SPI_TP_RegisterHalfCb(const SPI_TP_HalfCallback pfCb);
 
 /** @brief MASTER: called when a frame has finished going out. */
 extern STD_RESULT SPI_TP_RegisterSentCb(const SPI_TP_SentCallback pfCb);
+
+/** @brief Called on a peripheral error, either role. See SPI_TP_ErrorCallback. */
+extern STD_RESULT SPI_TP_RegisterErrorCb(const SPI_TP_ErrorCallback pfCb);
 
 /** @brief TRUE while a master frame is in flight. */
 extern BOOLEAN SPI_TP_IsBusy(void);
