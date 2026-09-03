@@ -64,6 +64,19 @@
 
 #define UART_TP_RX_MASK                 (UART_TP_RX_RING_BYTES - 1U)
 
+/*
+ * Where the DMA buffers go.
+ *
+ * Not a project macro like IN_DMA_BUF: the two firmwares that share this
+ * service put their DMA buffers in DIFFERENTLY NAMED sections (.dma_buffers and
+ * .ramd2dma), so a service that reached for either would build in one project
+ * and not the other. The cfg names it, and a project with nothing special to
+ * say leaves it empty and gets ordinary .bss.
+ */
+#ifndef UART_TP_DMA_SECTION
+#define UART_TP_DMA_SECTION
+#endif
+
 
 
 /***************************************************************************************************
@@ -78,13 +91,13 @@
  * clean or an invalidate around every access, which for a ring the DMA is
  * writing continuously is not a thing that can be done correctly.
  */
-static U8 aRxRing[UART_TP_RX_RING_BYTES] IN_DMA_BUF;
+static U8 aRxRing[UART_TP_RX_RING_BYTES] UART_TP_DMA_SECTION;
 
 /** Where the reader has got to. The DMA owns the write position implicitly. */
 static U16 nRxRead;
 
 /** Transmit queue. Copied into so the caller's buffer is free on return. */
-static U8  aTxQueue[UART_TP_TX_QUEUE_BYTES] IN_DMA_BUF;
+static U8  aTxQueue[UART_TP_TX_QUEUE_BYTES] UART_TP_DMA_SECTION;
 static U16 nTxHead;                 /**< next free slot                        */
 static U16 nTxTail;                 /**< next byte to send                     */
 static U16 nTxInFlight;             /**< bytes the DMA is currently sending    */

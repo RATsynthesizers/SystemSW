@@ -48,56 +48,69 @@
 
 
 /*
- * ======== BAUD RATE PRESCALER ==============================
+ * ======== CLOCK ==============================
  *
- * SCK = kernel / 2^(MBR+1), so the divider is a power of two from 2 to 256 and
- * nothing in between. Asking for a clock that is not kernel/2^n is therefore
- * not a rounding matter - it is a different clock - so the ratio is checked
- * exactly and a build that cannot produce the requested speed fails here
- * naming both numbers.
- *
- * Getting this wrong is otherwise close to invisible: a stream running at half
- * the intended rate still carries plausible data, just not enough of it, and
- * the symptom is dropped frames somewhere else entirely.
+ * THE TWO ROLES CONSTRAIN THE CLOCK DIFFERENTLY, and conflating them is a trap
+ * worth spelling out: a master DIVIDES its kernel down to SCK, while a slave
+ * takes SCK off the wire and only has to be able to SAMPLE it. So the
+ * power-of-two rule below applies to the master alone - requiring it of a slave
+ * would reject perfectly good configurations, and the natural slave setting
+ * (kernel 2.5x SCK, for sampling margin) is one of them.
  */
-#define SPI_TP_DIVIDER                  (SPI_TP_KERNEL_HZ / SPI_TP_SCK_HZ)
+#if (SPI_TP_ROLE == SPI_TP_ROLE_MASTER)
 
-#if ((SPI_TP_KERNEL_HZ % SPI_TP_SCK_HZ) != 0UL)
-    #error "spi_tp_cfg.h: SPI_TP_KERNEL_HZ is not a whole multiple of SPI_TP_SCK_HZ"
-#endif
+    /*
+     * SCK = kernel / 2^(MBR+1), so the divider is a power of two from 2 to 256
+     * and nothing in between. Asking for a clock that is not kernel/2^n is not
+     * a rounding matter - it is a different clock - so the ratio is checked
+     * exactly and a build that cannot produce it fails here naming both
+     * numbers.
+     *
+     * Getting this wrong is otherwise close to invisible: a stream running at
+     * half the intended rate still carries plausible data, just not enough of
+     * it, and the symptom is dropped frames somewhere else entirely.
+     */
+    #define SPI_TP_DIVIDER              (SPI_TP_KERNEL_HZ / SPI_TP_SCK_HZ)
 
-#if   (SPI_TP_DIVIDER == 2UL)
-    #define SPI_TP_PRESCALER            SPI_BAUDRATEPRESCALER_2
-#elif (SPI_TP_DIVIDER == 4UL)
-    #define SPI_TP_PRESCALER            SPI_BAUDRATEPRESCALER_4
-#elif (SPI_TP_DIVIDER == 8UL)
-    #define SPI_TP_PRESCALER            SPI_BAUDRATEPRESCALER_8
-#elif (SPI_TP_DIVIDER == 16UL)
-    #define SPI_TP_PRESCALER            SPI_BAUDRATEPRESCALER_16
-#elif (SPI_TP_DIVIDER == 32UL)
-    #define SPI_TP_PRESCALER            SPI_BAUDRATEPRESCALER_32
-#elif (SPI_TP_DIVIDER == 64UL)
-    #define SPI_TP_PRESCALER            SPI_BAUDRATEPRESCALER_64
-#elif (SPI_TP_DIVIDER == 128UL)
-    #define SPI_TP_PRESCALER            SPI_BAUDRATEPRESCALER_128
-#elif (SPI_TP_DIVIDER == 256UL)
-    #define SPI_TP_PRESCALER            SPI_BAUDRATEPRESCALER_256
+    #if ((SPI_TP_KERNEL_HZ % SPI_TP_SCK_HZ) != 0UL)
+        #error "spi_tp_cfg.h: SPI_TP_KERNEL_HZ is not a whole multiple of SPI_TP_SCK_HZ"
+    #endif
+
+    #if   (SPI_TP_DIVIDER == 2UL)
+        #define SPI_TP_PRESCALER        SPI_BAUDRATEPRESCALER_2
+    #elif (SPI_TP_DIVIDER == 4UL)
+        #define SPI_TP_PRESCALER        SPI_BAUDRATEPRESCALER_4
+    #elif (SPI_TP_DIVIDER == 8UL)
+        #define SPI_TP_PRESCALER        SPI_BAUDRATEPRESCALER_8
+    #elif (SPI_TP_DIVIDER == 16UL)
+        #define SPI_TP_PRESCALER        SPI_BAUDRATEPRESCALER_16
+    #elif (SPI_TP_DIVIDER == 32UL)
+        #define SPI_TP_PRESCALER        SPI_BAUDRATEPRESCALER_32
+    #elif (SPI_TP_DIVIDER == 64UL)
+        #define SPI_TP_PRESCALER        SPI_BAUDRATEPRESCALER_64
+    #elif (SPI_TP_DIVIDER == 128UL)
+        #define SPI_TP_PRESCALER        SPI_BAUDRATEPRESCALER_128
+    #elif (SPI_TP_DIVIDER == 256UL)
+        #define SPI_TP_PRESCALER        SPI_BAUDRATEPRESCALER_256
+    #else
+        #error "spi_tp_cfg.h: SPI_TP_SCK_HZ is not SPI_TP_KERNEL_HZ / 2^n for n in 1..8"
+    #endif
+
 #else
-    #error "spi_tp_cfg.h: SPI_TP_SCK_HZ is not SPI_TP_KERNEL_HZ / 2^n for n in 1..8"
-#endif
 
-
-/*
- * A SLAVE cannot sample reliably with a kernel clock close to SCK: the input is
- * resynchronised into the kernel domain, so the kernel has to be at least twice
- * the bit clock and wants more. At exactly 2x there is no margin left for cable
- * delay or the master's clock-to-out, and the failure is silent corruption of a
- * stream that has no CRC to catch it.
- */
-#if (SPI_TP_ROLE == SPI_TP_ROLE_SLAVE)
+    /*
+     * A slave resynchronises the incoming clock into its own kernel domain, so
+     * the kernel must be at least twice the bit clock - and wants more. At
+     * exactly 2x there is no margin left for cable delay or the master's
+     * clock-to-out, and the failure is silent corruption of a stream with no
+     * CRC to catch it.
+     *
+     * No power-of-two requirement: nothing here divides anything.
+     */
     #if ((SPI_TP_KERNEL_HZ / SPI_TP_SCK_HZ) < 2UL)
         #error "spi_tp_cfg.h: a slave needs SPI_TP_KERNEL_HZ >= 2 * SPI_TP_SCK_HZ"
     #endif
+
 #endif
 
 
@@ -293,10 +306,17 @@ BOOLEAN SPI_TP_IsBusy(void)
 
 U32 SPI_TP_ActualSckHz(void)
 {
-    /* What the divider really produces, not what was asked for. On a slave the
-       clock comes from the wire, so this is the master's intended rate and is
-       reported for comparison rather than as a measurement. */
+#if (SPI_TP_ROLE == SPI_TP_ROLE_MASTER)
+    /* What the divider really produces, not what was asked for. The two agree
+       here only because the build refuses configurations where they cannot. */
     return (U32)(SPI_TP_KERNEL_HZ / SPI_TP_DIVIDER);
+#else
+    /* A slave has no divider - the clock arrives on the wire. This is the rate
+       it has been told to expect, reported so a mismatch between the two ends
+       can be seen from a diagnostic frame rather than inferred from CRC errors
+       on a stream that has no CRC. */
+    return (U32)SPI_TP_SCK_HZ;
+#endif
 }
 
 

@@ -96,6 +96,23 @@
  */
 #define UART_TP_TX_QUEUE_BYTES          (512U)
 
+/**
+ * Where the transport's DMA buffers are placed.
+ *
+ * Leave it empty and they land in ordinary .bss, which is correct on a part
+ * with no data cache. On a part that HAS one, buffers a DMA touches must be in
+ * memory that is not cached, or every transfer needs a clean or an invalidate
+ * around it - and for a circular receive ring that runs continuously, there is
+ * no correct place to put one.
+ *
+ * Named here rather than taken from a project macro because projects sharing
+ * this service call their DMA section different things.
+ *
+ *   #define UART_TP_DMA_SECTION \
+ *       __attribute__((section(".dma_buffers"), used, aligned(32)))
+ */
+#define UART_TP_DMA_SECTION
+
 
 
 /***************************************************************************************************
