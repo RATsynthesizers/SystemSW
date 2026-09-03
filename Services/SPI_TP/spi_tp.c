@@ -254,6 +254,63 @@ STD_RESULT SPI_TP_StartReceive(void* const pRing, const U16 nWords)
 }
 
 
+STD_RESULT SPI_TP_StartTransceive(void* const pRxRing,
+                                  void* const pTxRing,
+                                  const U16 nWords)
+{
+#if (SPI_TP_ROLE == SPI_TP_ROLE_SLAVE)
+
+    if ((pRxRing == NULL_PTR) || (pTxRing == NULL_PTR) || (nWords == 0U))
+    {
+        return RESULT_INVALID_PARAM_1;
+    }
+
+    if ((nWords & 1U) != 0U)
+    {
+        return RESULT_INVALID_PARAM_3;
+    }
+
+    if (bInitDone == FALSE)
+    {
+        return RESULT_NOT_INIT;
+    }
+
+    /*
+     * Armed once, both directions, and never re-armed - the same reasoning as
+     * the receive-only case. The transmit side inherits it: a gap between
+     * transfers would shift every subsequent word by however many the master
+     * clocked while nothing was armed, and the far end de-interleaves by
+     * position with nothing to detect that with.
+     *
+     * BOTH DMA channels must be CIRCULAR in CubeMX. A normal-mode transmit
+     * channel is the subtle one: reception carries on looking healthy while the
+     * transmit side silently stops after one lap, so the link appears to work
+     * in the direction being watched.
+     */
+    if (HAL_SPI_TransmitReceive_DMA(&SPI_TP_HANDLE,
+                                    (uint8_t*)pTxRing,
+                                    (uint8_t*)pRxRing,
+                                    nWords) != HAL_OK)
+    {
+        return RESULT_NOT_OK;
+    }
+
+    return RESULT_OK;
+
+#else
+
+    (void)pRxRing;
+    (void)pTxRing;
+    (void)nWords;
+
+    /* A master sends frames on its own schedule; it has no continuously armed
+       ring to transceive into. */
+    return RESULT_NOT_OK;
+
+#endif
+}
+
+
 STD_RESULT SPI_TP_SendFrame(const void* const pWords, const U16 nWords)
 {
 #if (SPI_TP_ROLE == SPI_TP_ROLE_MASTER)
@@ -365,6 +422,44 @@ void HAL_SPI_RxHalfCpltCallback(SPI_HandleTypeDef* hspi)
 
 
 void HAL_SPI_RxCpltCallback(SPI_HandleTypeDef* hspi)
+{
+    if (hspi != &SPI_TP_HANDLE)
+    {
+        return;
+    }
+
+    tStats.nHalvesReceived++;
+
+    if (pfHalfCb != NULL_PTR)
+    {
+        pfHalfCb(TRUE);
+    }
+}
+
+
+/*
+ * A full-duplex transfer raises the TxRx callbacks, NOT the Rx ones - a
+ * distinction that costs an afternoon if it is missed, because reception
+ * plainly works and yet nothing is ever called. Both routes lead to the same
+ * place: the application only cares which half is free.
+ */
+void HAL_SPI_TxRxHalfCpltCallback(SPI_HandleTypeDef* hspi)
+{
+    if (hspi != &SPI_TP_HANDLE)
+    {
+        return;
+    }
+
+    tStats.nHalvesReceived++;
+
+    if (pfHalfCb != NULL_PTR)
+    {
+        pfHalfCb(FALSE);
+    }
+}
+
+
+void HAL_SPI_TxRxCpltCallback(SPI_HandleTypeDef* hspi)
 {
     if (hspi != &SPI_TP_HANDLE)
     {

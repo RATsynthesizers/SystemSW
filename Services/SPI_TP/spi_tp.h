@@ -188,6 +188,30 @@ extern STD_RESULT SPI_TP_DeInit(void);
 extern STD_RESULT SPI_TP_StartReceive(void* const pRing, const U16 nWords);
 
 /**
+ * @brief SLAVE: arm the ring in BOTH directions. Call before the master starts.
+ *
+ * Same contract as SPI_TP_StartReceive plus a transmit ring, for a link that
+ * also has to send. The slave does not choose when its bytes go out - the
+ * master's clock does - so the transmit ring is filled continuously and
+ * whatever is in it at the moment a frame is clocked is what leaves.
+ *
+ * THAT IS WHY THE TRANSMIT RING IS FILLED A HALF AHEAD. The half callback says
+ * which half just completed; the application refills THAT half while the master
+ * clocks out the other. Filling the half being clocked puts a partly written
+ * frame on the wire, and a positionally framed stream has nothing to notice it
+ * with.
+ *
+ * Both rings must be the same length, so one half boundary serves both.
+ *
+ * @param pRxRing  receive ring, in memory a DMA can reach
+ * @param pTxRing  transmit ring, likewise; must stay valid for the session
+ * @param nWords   words of the configured data size, in EACH ring; must be even
+ */
+extern STD_RESULT SPI_TP_StartTransceive(void* const pRxRing,
+                                         void* const pTxRing,
+                                         const U16 nWords);
+
+/**
  * @brief MASTER: send one frame. Returns immediately.
  *
  * Refused with RESULT_BUSY when the previous frame is still going out, which
