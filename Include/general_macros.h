@@ -67,10 +67,10 @@
 // Convert ASCII symbol to its HEX value: CHAR = {'0'..'F'} -> {0x0..0xF}
 #define ASCII_TO_BIN(symbol)    (((symbol) >= 0x41U) ? ((symbol) - 0x37U) : ((symbol) - 0x30U))
 
-// Find maximum value macro
-#define MAX(valueA, valueB)     (((valueA) > (valueB)) ? (valueA) : (valueB))
-// Find minimum value macro
-#define MIN(valueA, valueB)     (((valueA) < (valueB)) ? (valueA) : (valueB))
+//// Find maximum value macro
+//#define MAX(valueA, valueB)     (((valueA) > (valueB)) ? (valueA) : (valueB))
+//// Find minimum value macro
+//#define MIN(valueA, valueB)     (((valueA) < (valueB)) ? (valueA) : (valueB))
 
 // Amount seconds in one hour
 #define SECOND_IN_ONE_HOUR                  (3600U)

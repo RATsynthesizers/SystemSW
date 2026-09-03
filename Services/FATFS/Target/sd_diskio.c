@@ -6,7 +6,7 @@
   ******************************************************************************
   * @attention
   *
-  * Copyright (c) 2025 STMicroelectronics.
+  * Copyright (c) 2026 STMicroelectronics.
   * All rights reserved.
   *
   * This software is licensed under terms that can be found in the LICENSE file
@@ -34,9 +34,7 @@
 /* Private typedef -----------------------------------------------------------*/
 /* Private define ------------------------------------------------------------*/
 
-#define QUEUE_SIZE         (uint32_t) 10
-#define READ_CPLT_MSG      (uint32_t) 1
-#define WRITE_CPLT_MSG     (uint32_t) 2
+
 /*
 ==================================================================
 enable the defines below to send custom rtos messages
@@ -75,7 +73,16 @@ See BSP_SD_ErrorCallback() and BSP_SD_AbortCallback() below
  * Notice: This is applicable only for cortex M7 based platform.
  */
 /* USER CODE BEGIN enableSDDmaCacheMaintenance */
-/* #define ENABLE_SD_DMA_CACHE_MAINTENANCE  1 */
+/*
+ * ON, because the D-cache is now enabled - see MPU_Config in Init.c.
+ *
+ * The SD card is the one DMA user that cannot be fixed by placement: FatFs
+ * hands this driver buffers from wherever they happen to live, including the
+ * stack, so there is no region to mark non-cacheable. This is ST's own
+ * invalidate-after-read / clean-before-write implementation, which was
+ * already sitting here switched off.
+ */
+#define ENABLE_SD_DMA_CACHE_MAINTENANCE  1
 /* USER CODE END enableSDDmaCacheMaintenance */
 
 /*
@@ -98,11 +105,9 @@ __ALIGN_BEGIN static uint8_t scratch[BLOCKSIZE] __ALIGN_END;
 /* Disk status */
 static volatile DSTATUS Stat = STA_NOINIT;
 
-#if (osCMSIS <= 0x20000U)
-static osMessageQId SDQueueID = NULL;
-#else
-static osMessageQueueId_t SDQueueID = NULL;
-#endif
+extern osMutexId SDMMC_MutexID;
+extern osMessageQId FatFS_QueueID;
+extern SD_OwnerTypeDef sd_owner;
 /* Private function prototypes -----------------------------------------------*/
 static DSTATUS SD_CheckStatus(BYTE lun);
 DSTATUS SD_initialize (BYTE);
@@ -205,17 +210,7 @@ Stat = STA_NOINIT;
 
     if (Stat != STA_NOINIT)
     {
-      if (SDQueueID == NULL)
-      {
- #if (osCMSIS <= 0x20000U)
-      osMessageQDef(SD_Queue, QUEUE_SIZE, uint16_t);
-      SDQueueID = osMessageCreate (osMessageQ(SD_Queue), NULL);
-#else
-      SDQueueID = osMessageQueueNew(QUEUE_SIZE, 2, NULL);
-#endif
-      }
-
-      if (SDQueueID == NULL)
+      if (FatFS_QueueID == NULL || SDMMC_MutexID == NULL)
       {
         Stat |= STA_NOINIT;
       }
@@ -265,10 +260,17 @@ DRESULT SD_read(BYTE lun, BYTE *buff, DWORD sector, UINT count)
   * ensure the SDCard is ready for a new operation
   */
 
+  if (osOK != osMutexWait(SDMMC_MutexID, SD_TIMEOUT))
+  {
+	return res;
+  }
+
   if (SD_CheckStatusWithTimeout(SD_TIMEOUT) < 0)
   {
     return res;
   }
+
+  sd_owner = SD_OWNER_FATFS;
 
 #if defined(ENABLE_SCRATCH_BUFFER)
   if (!((uint32_t)buff & 0x3))
@@ -280,7 +282,7 @@ DRESULT SD_read(BYTE lun, BYTE *buff, DWORD sector, UINT count)
     if (ret == MSD_OK) {
 #if (osCMSIS < 0x20000U)
     /* wait for a message from the queue or a timeout */
-    event = osMessageGet(SDQueueID, SD_TIMEOUT);
+    event = osMessageGet(FatFS_QueueID, SD_TIMEOUT);
 
     if (event.status == osEventMessage)
     {
@@ -290,7 +292,7 @@ DRESULT SD_read(BYTE lun, BYTE *buff, DWORD sector, UINT count)
         /* block until SDIO IP is ready or a timeout occur */
         while(osKernelSysTick() - timer <SD_TIMEOUT)
 #else
-          status = osMessageQueueGet(SDQueueID, (void *)&event, NULL, SD_TIMEOUT);
+          status = osMessageQueueGet(FatFS_QueueID, (void *)&event, NULL, SD_TIMEOUT);
           if ((status == osOK) && (event == READ_CPLT_MSG))
           {
             timer = osKernelGetTickCount();
@@ -335,7 +337,7 @@ DRESULT SD_read(BYTE lun, BYTE *buff, DWORD sector, UINT count)
           /* wait until the read is successful or a timeout occurs */
 #if (osCMSIS < 0x20000U)
           /* wait for a message from the queue or a timeout */
-          event = osMessageGet(SDQueueID, SD_TIMEOUT);
+          event = osMessageGet(FatFS_QueueID, SD_TIMEOUT);
 
           if (event.status == osEventMessage)
           {
@@ -345,7 +347,7 @@ DRESULT SD_read(BYTE lun, BYTE *buff, DWORD sector, UINT count)
               /* block until SDIO IP is ready or a timeout occur */
               while(osKernelSysTick() - timer <SD_TIMEOUT)
 #else
-                status = osMessageQueueGet(SDQueueID, (void *)&event, NULL, SD_TIMEOUT);
+                status = osMessageQueueGet(FatFS_QueueID, (void *)&event, NULL, SD_TIMEOUT);
               if ((status == osOK) && (event == READ_CPLT_MSG))
               {
                 timer = osKernelGetTickCount();
@@ -392,6 +394,8 @@ DRESULT SD_read(BYTE lun, BYTE *buff, DWORD sector, UINT count)
         res = RES_OK;
     }
 #endif
+  sd_owner = SD_OWNER_NONE;
+  osMutexRelease(SDMMC_MutexID);
   return res;
 }
 
@@ -428,10 +432,17 @@ DRESULT SD_write(BYTE lun, const BYTE *buff, DWORD sector, UINT count)
   * ensure the SDCard is ready for a new operation
   */
 
+  if (osOK != osMutexWait(SDMMC_MutexID, SD_TIMEOUT))
+  {
+	return res;
+  }
+
   if (SD_CheckStatusWithTimeout(SD_TIMEOUT) < 0)
   {
     return res;
   }
+
+  sd_owner = SD_OWNER_FATFS;
 
 #if defined(ENABLE_SCRATCH_BUFFER)
   if (!((uint32_t)buff & 0x3))
@@ -453,14 +464,14 @@ DRESULT SD_write(BYTE lun, const BYTE *buff, DWORD sector, UINT count)
   {
 #if (osCMSIS < 0x20000U)
     /* Get the message from the queue */
-    event = osMessageGet(SDQueueID, SD_TIMEOUT);
+    event = osMessageGet(FatFS_QueueID, SD_TIMEOUT);
 
     if (event.status == osEventMessage)
     {
       if (event.value.v == WRITE_CPLT_MSG)
       {
 #else
-    status = osMessageQueueGet(SDQueueID, (void *)&event, NULL, SD_TIMEOUT);
+    status = osMessageQueueGet(FatFS_QueueID, (void *)&event, NULL, SD_TIMEOUT);
     if ((status == osOK) && (event == WRITE_CPLT_MSG))
     {
 #endif
@@ -509,7 +520,7 @@ DRESULT SD_write(BYTE lun, const BYTE *buff, DWORD sector, UINT count)
           /* wait until the read is successful or a timeout occurs */
 #if (osCMSIS < 0x20000U)
           /* wait for a message from the queue or a timeout */
-          event = osMessageGet(SDQueueID, SD_TIMEOUT);
+          event = osMessageGet(FatFS_QueueID, SD_TIMEOUT);
 
           if (event.status == osEventMessage)
           {
@@ -519,7 +530,7 @@ DRESULT SD_write(BYTE lun, const BYTE *buff, DWORD sector, UINT count)
               /* block until SDIO IP is ready or a timeout occur */
               while(osKernelSysTick() - timer <SD_TIMEOUT)
 #else
-                status = osMessageQueueGet(SDQueueID, (void *)&event, NULL, SD_TIMEOUT);
+                status = osMessageQueueGet(FatFS_QueueID, (void *)&event, NULL, SD_TIMEOUT);
               if ((status == osOK) && (event == READ_CPLT_MSG))
               {
                 timer = osKernelGetTickCount();
@@ -559,7 +570,8 @@ DRESULT SD_write(BYTE lun, const BYTE *buff, DWORD sector, UINT count)
 
   }
 #endif
-
+  sd_owner = SD_OWNER_NONE;
+  osMutexRelease(SDMMC_MutexID);
   return res;
 }
  #endif /* _USE_WRITE == 1 */
@@ -622,61 +634,7 @@ DRESULT SD_ioctl(BYTE lun, BYTE cmd, void *buff)
 /* can be used to modify previous code / undefine following code / add new code */
 /* USER CODE END afterIoctlSection */
 
-/* USER CODE BEGIN callbackSection */
-/* can be used to modify / following code or add new code */
-/* USER CODE END callbackSection */
-/**
-  * @brief Tx Transfer completed callbacks
-  * @param hsd: SD handle
-  * @retval None
-  */
-void BSP_SD_WriteCpltCallback(void)
-{
 
-  /*
-   * No need to add an "osKernelRunning()" check here, as the SD_initialize()
-   * is always called before any SD_Read()/SD_Write() call
-   */
-#if (osCMSIS < 0x20000U)
-   osMessagePut(SDQueueID, WRITE_CPLT_MSG, 0);
-#else
-   const uint16_t msg = WRITE_CPLT_MSG;
-   osMessageQueuePut(SDQueueID, (const void *)&msg, 0, 0);
-#endif
-}
-
-/**
-  * @brief Rx Transfer completed callbacks
-  * @param hsd: SD handle
-  * @retval None
-  */
-void BSP_SD_ReadCpltCallback(void)
-{
-  /*
-   * No need to add an "osKernelRunning()" check here, as the SD_initialize()
-   * is always called before any SD_Read()/SD_Write() call
-   */
-#if (osCMSIS < 0x20000U)
-   osMessagePut(SDQueueID, READ_CPLT_MSG, 0);
-#else
-   const uint16_t msg = READ_CPLT_MSG;
-   osMessageQueuePut(SDQueueID, (const void *)&msg, 0, 0);
-#endif
-}
-
-/* USER CODE BEGIN ErrorAbortCallbacks */
-/*
-void BSP_SD_AbortCallback(void)
-{
-#if (osCMSIS < 0x20000U)
-   osMessagePut(SDQueueID, RW_ABORT_MSG, 0);
-#else
-   const uint16_t msg = RW_ABORT_MSG;
-   osMessageQueuePut(SDQueueID, (const void *)&msg, 0, 0);
-#endif
-}
-*/
-/* USER CODE END ErrorAbortCallbacks */
 
 /* USER CODE BEGIN lastSection */
 /* can be used to modify / undefine previous code or add new code */
