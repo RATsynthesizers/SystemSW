@@ -69,6 +69,9 @@
 #include "general.h"
 #include "fx_defs.h"
 
+/* FX_LOOP_SLOT_QTY_MAX - the loop transport shares this stream's frames. */
+#include "fx_loop.h"
+
 /* One wire contract, two compilers: the audio controller builds this as C, the
  * interface controller includes it from C++. */
 #ifdef __cplusplus
@@ -83,6 +86,26 @@ extern "C" {
 
 /** Bytes per slot. S32 carrying 24 bits - see recorder.h on why not 3. */
 #define FX_IL_BYTES_PER_SLOT            (4U)
+
+/**
+ * Widest single transfer, in slots.
+ *
+ * A recorder route is 1 or 2 - a mono chain or a stereo pair. The loop
+ * transport is what makes this larger: its slots are contiguous, so it is
+ * lifted as one transfer of up to FX_LOOP_SLOT_QTY_MAX rather than one per
+ * slot. That is the difference between one MDMA route and sixteen, and there
+ * are only five routes available.
+ */
+#define FX_IL_SLOT_WIDTH_MAX            (FX_LOOP_SLOT_QTY_MAX)
+
+/**
+ * Widest frame on the wire, in slots.
+ *
+ * REC_SLOT_QTY recorder slots, plus the loop run while a transfer is running.
+ * The frame narrows again when it ends, so this is a ceiling rather than the
+ * usual case.
+ */
+#define FX_IL_STREAM_WIDTH_MAX          (REC_SLOT_QTY + FX_LOOP_SLOT_QTY_MAX)
 
 
 

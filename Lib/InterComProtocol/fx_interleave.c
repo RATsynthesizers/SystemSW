@@ -44,15 +44,31 @@ STD_RESULT FxInterleave_Xfer(FX_IL_XFER* const pOut,
         return RESULT_INVALID_PARAM_1;
     }
 
-    /* A chain is mono or a stereo PAIR. Nothing else exists - see the width
-       invariant in fx_defs.h - and accepting anything else here would compute a
-       transfer that runs off the end of a frame. */
-    if ((nSlotWidth != 1U) && (nSlotWidth != 2U))
+    /*
+     * A RECORDER chain is mono or a stereo pair, and nothing else exists - see
+     * the width invariant in fx_defs.h.
+     *
+     * The LOOP transport is the exception, and the reason this is a range now
+     * rather than "1 or 2": its slots are contiguous on the wire, so it lifts
+     * the whole run as ONE transfer of up to FX_LOOP_SLOT_QTY_MAX slots. That
+     * is what makes it cost one MDMA route instead of one per slot, which is
+     * the only reason it fits alongside the four recorder planes.
+     *
+     * Zero is still refused - a transfer of nothing is a caller bug, not a
+     * no-op worth computing geometry for.
+     */
+    if ((nSlotWidth == 0U) || (nSlotWidth > (U8)FX_IL_SLOT_WIDTH_MAX))
     {
         return RESULT_INVALID_PARAM_3;
     }
 
-    if ((nStreamWidth == 0U) || (nStreamWidth > (U8)REC_SLOT_QTY))
+    /*
+     * The frame WIDENS during a loop transfer: REC_SLOT_QTY recorder slots
+     * followed by the loop run. This used to cap at REC_SLOT_QTY, which was
+     * right when the recorder was all there was and would now refuse every
+     * block of a transfer.
+     */
+    if ((nStreamWidth == 0U) || (nStreamWidth > (U8)FX_IL_STREAM_WIDTH_MAX))
     {
         return RESULT_INVALID_PARAM_4;
     }
