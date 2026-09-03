@@ -206,6 +206,16 @@ STD_RESULT FxLink_Init(const FX_LINK_TX_FN pfTx, const FX_LINK_DISPATCH_FN pfDis
 
 //--------------------------------------------------------------------------------------------------
 
+void FxLink_Resync(void)
+{
+    /* Exactly what the parser does when it gives up on a frame itself, so a
+       transport-reported loss and a self-detected one are indistinguishable in
+       the statistics - which is right: both mean the same thing happened. */
+    Resync();
+}
+
+//--------------------------------------------------------------------------------------------------
+
 void FxLink_RxByte(const U8 nByte)
 {
     const U16 nNext = (U16)((nRxHead + 1U) & (FX_LINK_RX_RING_BYTES - 1U));

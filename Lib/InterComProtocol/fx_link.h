@@ -167,6 +167,24 @@ extern STD_RESULT FxLink_Init(const FX_LINK_TX_FN pfTx, const FX_LINK_DISPATCH_F
 extern void FxLink_RxByte(const U8 nByte);
 
 /**
+ * @brief Abandon the frame being assembled and hunt for a sync word again.
+ *
+ * For a transport that KNOWS bytes were lost - a receive overrun, a framing
+ * error, a re-armed DMA. The framer cannot discover that by itself: it is
+ * holding the front of a frame whose middle is missing, and the next bytes to
+ * arrive look like a continuation.
+ *
+ * Without this the damage is usually caught by the CRC, which is a different
+ * claim from being caught reliably: a spliced frame whose length byte survived
+ * can consume the real frame behind it, so one lost byte costs two frames
+ * instead of one. Calling this the moment the loss is known costs one.
+ *
+ * Counted in FX_LINK_STATS.nResyncs, the same as a resync the parser decided on
+ * for itself.
+ */
+extern void FxLink_Resync(void);
+
+/**
  * @brief Drain the ring, parse whole frames, dispatch them.
  *
  * NOT for interrupt context: dispatch is where the work happens, and on the
