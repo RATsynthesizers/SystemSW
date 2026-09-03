@@ -55,16 +55,39 @@ extern "C" {
  *
  *   slots * 4 B * 48000 Hz * 8 = bits/s
  *      4 ->  6.1 Mbit/s      12 -> 18.4 Mbit/s
- *      8 -> 12.3 Mbit/s      16 -> 24.6 Mbit/s
+ *      8 -> 12.3 Mbit/s      28 -> 43.0 Mbit/s
  *
- * Plus REC_SLOT_QTY of recorder underneath. At 16 the total frame is 20 slots,
- * 30.7 Mbit/s, which needs the SPI kernel moved off I2S_CKIN before it fits -
- * the pin clock caps SCK at 12.288 MHz and the recorder alone is half of that.
+ * ------------------------------------------------------------------------
+ * TWELVE, NOT SIXTEEN, AND THE REASON IS NOT BANDWIDTH
+ * ------------------------------------------------------------------------
  *
- * The cap exists so that a bad or hostile value cannot ask for a frame the
- * link cannot carry; the negotiation grants what it can and reports it back.
+ * The receiver's SPI ring is a fixed number of WORDS, and its half-transfer
+ * interrupt fires at the halfway word. For the de-interleave to work, that
+ * halfway point must land on a FRAME boundary - otherwise the callback hands
+ * over a half whose last frame is cut in two, and a positionally framed stream
+ * has nothing to notice that with.
+ *
+ * So the TOTAL width must divide the half-ring exactly. At the interface's
+ * REC_RX_WORDS of 8192 that half is 4096 words:
+ *
+ *      total width   frames per half
+ *          4            1024.0   OK   (recorder alone)
+ *          8             512.0   OK
+ *         16             256.0   OK   <- 12 loop slots
+ *         20             204.8   NO   <- 16 loop slots, does not divide
+ *         32             128.0   OK
+ *
+ * Sixteen loop slots makes the frame 20 wide, which does not divide 4096. It
+ * was the first value here and it was wrong: the de-interleave would have been
+ * told 1024 frames when the half held 204, reading five times the buffer.
+ *
+ * Twelve costs a little speed - 2.5 s per 5.5 MiB loop instead of 1.88 - and
+ * is correct. Twenty-eight is the next legal step up if the ring grows.
+ *
+ * The cap also stops a bad or hostile value asking for a frame the link cannot
+ * carry; the negotiation grants what it can and reports it back.
  */
-#define FX_LOOP_SLOT_QTY_MAX            (16U)
+#define FX_LOOP_SLOT_QTY_MAX            (12U)
 
 /** Bytes per sample on the wire, by PROTO_LOOP_FMT. */
 #define FX_LOOP_BYTES_S24               (3UL)
