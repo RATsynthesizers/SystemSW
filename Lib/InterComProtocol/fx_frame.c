@@ -155,7 +155,7 @@ static U8 FindMarkPhase(const S32* const pWords, const U32 nWordsAvail)
         nMax = (U32)FX_FRAME_SLOT_QTY;
     }
 
-    for (k = 1UL; k < nMax; k++)
+    for (k = 0UL; k < nMax; k++)
     {
         if (FX_FRAME_MARK_OF(pWords[k]) == (U16)FX_FRAME_SYNC_MARK)
         {
