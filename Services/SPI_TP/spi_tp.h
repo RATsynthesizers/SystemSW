@@ -224,6 +224,35 @@ extern STD_RESULT SPI_TP_StartTransceive(void* const pRxRing,
  */
 extern STD_RESULT SPI_TP_SendFrame(const void* const pWords, const U16 nWords);
 
+/**
+ * @brief MASTER: send one frame AND capture what the slave clocks back.
+ *
+ * Same timing contract as SPI_TP_SendFrame - one finite burst per call,
+ * refused with RESULT_BUSY while the previous one is still going - but
+ * full duplex, so the slave's MISO words land in pRxWords.
+ *
+ * This exists for the loop LOAD direction. A master that only transmits has
+ * no way to receive a loop coming back from the card, and MISO is otherwise
+ * clocked and discarded.
+ *
+ * THE RECEIVED BUFFER IS ONLY VALID ONCE THE FRAME HAS COMPLETED. The sent
+ * callback is the earliest point it can be read; reading it during the burst
+ * gets whatever the DMA has written so far, which for a positional stream is
+ * indistinguishable from real data. Use two buffers and read the one that
+ * just finished.
+ *
+ * BOTH DMA channels must be NORMAL mode for this role, not circular: the
+ * burst is finite and a circular channel never raises completion.
+ *
+ * @param pTxWords  frame to send, in memory a DMA can reach
+ * @param pRxWords  where to put the received frame, likewise; must be
+ *                  distinct from pTxWords and stay valid until completion
+ * @param nWords    words of the configured data size, in EACH buffer
+ */
+extern STD_RESULT SPI_TP_SendRecvFrame(const void* const pTxWords,
+                                       void* const pRxWords,
+                                       const U16 nWords);
+
 /** @brief SLAVE: called at each half of the receive ring. */
 extern STD_RESULT SPI_TP_RegisterHalfCb(const SPI_TP_HalfCallback pfCb);
 

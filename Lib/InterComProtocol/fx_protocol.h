@@ -157,7 +157,16 @@ typedef enum enPROTO_RESULT
     PROTO_RES_BAD_PARAM     = 4U,
     PROTO_RES_BUSY          = 5U,       /**< a rebuild is already pending         */
     PROTO_RES_BAD_WIDTH     = 6U,       /**< effect width does not match the chain */
-    PROTO_RES_NO_SPACE      = 7U        /**< loop will not fit the other side      */
+    PROTO_RES_NO_SPACE      = 7U,       /**< loop will not fit the other side      */
+    PROTO_RES_TIMEOUT       = 8U        /**< session gave up waiting - see below   */
+    /*
+     * TIMEOUT is the answer to "the transfer stopped and nobody said why".
+     * Nothing on the loop path used to have a deadline, so a peer that reset
+     * mid-transfer left a session waiting on a byte count that would never
+     * arrive - holding a staging slot, refusing the next transfer as busy, for
+     * the rest of the run. A result code is how that reaches a screen instead
+     * of only a debugger.
+     */
 
 } PROTO_RESULT;
 

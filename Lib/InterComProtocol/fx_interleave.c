@@ -109,7 +109,7 @@ U32 FxInterleave_BlockBytes(const U8 nStreamWidth, const U32 nFrames)
 {
     U32 nBytes = 0UL;
 
-    if ((nStreamWidth > 0U) && (nStreamWidth <= (U8)REC_SLOT_QTY) && (nFrames > 0UL))
+    if ((nStreamWidth > 0U) && (nStreamWidth <= (U8)FX_IL_STREAM_WIDTH_MAX) && (nFrames > 0UL))
     {
         nBytes = nFrames * (U32)nStreamWidth * FX_IL_BYTES_PER_SLOT;
     }

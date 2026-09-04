@@ -89,12 +89,17 @@ static STD_RESULT FxLoop_CheckGeometry(const U8 eDir,
     }
 
     /*
-     * Zero slots would leave a session that can never make progress: it would
-     * reach RUNNING, widen the stream by nothing, and sit there until it was
-     * aborted by a timeout somewhere else. Refuse it at the negotiation, which
-     * is the only place that can say why.
+     * EXACTLY the loop slots the frame has - there is nothing left to
+     * negotiate. The frame is fixed at FX_FRAME_SLOT_QTY and all of its loop
+     * slots are always present, carrying zeros when no session is streaming.
+     *
+     * A smaller count used to be legal, and it was the last hole the fixed
+     * frame left open: the sender packed nSlotQty slots per frame while the
+     * receiver routed every loop slot into staging regardless, so the
+     * difference arrived as zeros spliced through the take. The SPI stream
+     * carries no CRC of its own, so nothing between the two would notice.
      */
-    if ((nSlotQty == 0U) || (nSlotQty > (U8)FX_LOOP_SLOT_QTY_MAX))
+    if (nSlotQty != (U8)FX_LOOP_SLOT_QTY_MAX)
     {
         return RESULT_NOT_OK;
     }

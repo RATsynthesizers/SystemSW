@@ -364,6 +364,66 @@ STD_RESULT SPI_TP_SendFrame(const void* const pWords, const U16 nWords)
 }
 
 
+STD_RESULT SPI_TP_SendRecvFrame(const void* const pTxWords,
+                                void* const pRxWords,
+                                const U16 nWords)
+{
+#if (SPI_TP_ROLE == SPI_TP_ROLE_MASTER)
+
+    if ((pTxWords == NULL_PTR) || (pRxWords == NULL_PTR) || (nWords == 0U))
+    {
+        return RESULT_INVALID_PARAM_1;
+    }
+
+    if (pTxWords == pRxWords)
+    {
+        /* One buffer for both directions would have the DMA overwrite each
+           word with the incoming one as it is sent. */
+        return RESULT_INVALID_PARAM_2;
+    }
+
+    if (bInitDone == FALSE)
+    {
+        return RESULT_NOT_INIT;
+    }
+
+    /* Same refusal as SPI_TP_SendFrame, and for the same reason - see there. */
+    if (bTxBusy == TRUE)
+    {
+        tStats.nFramesDropped++;
+        return RESULT_BUSY;
+    }
+
+    bTxBusy = TRUE;
+
+    if (HAL_SPI_TransmitReceive_DMA(&SPI_TP_HANDLE,
+                                    (uint8_t*)pTxWords,
+                                    (uint8_t*)pRxWords,
+                                    nWords) != HAL_OK)
+    {
+        bTxBusy = FALSE;
+        tStats.nSpiErrors++;
+        return RESULT_NOT_OK;
+    }
+
+    tStats.nFramesSent++;
+
+    return RESULT_OK;
+
+#else
+
+    (void)pTxWords;
+    (void)pRxWords;
+    (void)nWords;
+
+    /* A slave does not choose when a frame goes out - see
+       SPI_TP_StartTransceive, which arms both directions continuously. */
+    return RESULT_NOT_OK;
+
+#endif
+}
+
+
 BOOLEAN SPI_TP_IsBusy(void)
 {
     return bTxBusy;
@@ -450,12 +510,19 @@ void HAL_SPI_TxRxHalfCpltCallback(SPI_HandleTypeDef* hspi)
         return;
     }
 
+#if (SPI_TP_ROLE == SPI_TP_ROLE_SLAVE)
+
     tStats.nHalvesReceived++;
 
     if (pfHalfCb != NULL_PTR)
     {
         pfHalfCb(FALSE);
     }
+
+#endif
+
+    /* MASTER: half of a finite burst has moved, which is not an event this
+       role has anything to say about - the frame is done or it is not. */
 }
 
 
@@ -466,12 +533,31 @@ void HAL_SPI_TxRxCpltCallback(SPI_HandleTypeDef* hspi)
         return;
     }
 
+#if (SPI_TP_ROLE == SPI_TP_ROLE_SLAVE)
+
     tStats.nHalvesReceived++;
 
     if (pfHalfCb != NULL_PTR)
     {
         pfHalfCb(TRUE);
     }
+
+#else
+
+    /*
+     * MASTER: a full-duplex frame has finished, so this is the same event as
+     * HAL_SPI_TxCpltCallback - the buffers are free and the received words are
+     * now complete. Routed to the sent callback rather than the half callback,
+     * which belongs to the slave's continuously armed ring.
+     */
+    bTxBusy = FALSE;
+
+    if (pfSentCb != NULL_PTR)
+    {
+        pfSentCb();
+    }
+
+#endif
 }
 
 
