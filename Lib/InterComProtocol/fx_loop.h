@@ -260,13 +260,19 @@ extern void FxLoop_Report(const FX_LOOP_SESSION* const pSession,
  */
 extern BOOLEAN FxLoop_IsStreaming(const FX_LOOP_SESSION* const pSession);
 
-/**
- * @brief Total stream width while this session runs, in slots.
+/*
+ * FxLoop_StreamWidth is GONE, deliberately.
  *
- * REC_SLOT_QTY when nothing is in flight, so the caller can use it
- * unconditionally as "the width right now".
+ * It returned REC_SLOT_QTY when idle and a wider value while a session ran,
+ * because the frame used to change size mid-stream. The frame is fixed at
+ * FX_FRAME_SLOT_QTY now, so the honest version of this function would return a
+ * constant - and a function called StreamWidth that returns a constant invites
+ * a reader to believe the width still varies, which is the single most
+ * dangerous thing to be wrong about on this link.
+ *
+ * Use FX_FRAME_SLOT_QTY for the width and FxLoop_IsStreaming for whether the
+ * loop slots carry payload or zeros.
  */
-extern U8 FxLoop_StreamWidth(const FX_LOOP_SESSION* const pSession);
 
 #ifdef __cplusplus
 }

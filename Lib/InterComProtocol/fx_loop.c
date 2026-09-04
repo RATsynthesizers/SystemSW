@@ -520,16 +520,6 @@ BOOLEAN FxLoop_IsStreaming(const FX_LOOP_SESSION* const pSession)
 }
 
 
-U8 FxLoop_StreamWidth(const FX_LOOP_SESSION* const pSession)
-{
-    U8 nWidth = (U8)REC_SLOT_QTY;
-
-    if (FxLoop_IsStreaming(pSession) == TRUE)
-    {
-        nWidth = (U8)((U32)REC_SLOT_QTY + (U32)pSession->nSlotQty);
-    }
-
-    return nWidth;
-}
+/* FxLoop_StreamWidth removed with the negotiated frame - see fx_loop.h. */
 
 /****************************************** end of file *******************************************/
