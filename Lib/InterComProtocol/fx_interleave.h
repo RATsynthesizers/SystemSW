@@ -33,20 +33,30 @@
  *            One block is nFrames frames. Each frame is nStreamWidth slots, and
  *            each slot is one S32 carrying a 24-bit sample:
  *
- *                frame 0            frame 1            frame 2
- *                [s0][s1][s2][s3]   [s0][s1][s2][s3]   [s0][s1][s2][s3]
- *                 ^                  ^
- *                 |<--- stride ----->|      stride = nStreamWidth * 4 bytes
+ *                frame 0                    frame 1
+ *                [SY][R0][R1][R2][R3][L..]  [SY][R0][R1][R2][R3][L..]
+ *                 ^                          ^
+ *                 |<--------- stride ------->|   stride = nStreamWidth * 4 B
  *
- *            A MONO chain occupies one slot, so its samples are 16 bytes apart
- *            at the default width of 4. A STEREO chain occupies TWO ADJACENT
- *            slots, so its two samples are contiguous - 8 bytes moved per frame
- *            - which is already the interleaved order a stereo WAV file wants,
- *            and is why a stereo pair needs no separate merge step.
+ *            A MONO chain occupies one slot, so its samples are one stride
+ *            apart. A STEREO chain occupies TWO ADJACENT slots, so its two
+ *            samples are contiguous - 8 bytes moved per frame - which is
+ *            already the interleaved order a stereo WAV file wants, and is why
+ *            a stereo pair needs no separate merge step.
  *
- *            nStreamWidth comes from PROTO_ACK, not from a constant. The audio
- *            side reports what it actually committed to, and the interface must
- *            reprogram from that before it trusts the stream.
+ *            nStreamWidth is FX_FRAME_SLOT_QTY and does not change. It used to
+ *            arrive in a PROTO_ACK, because the frame widened for the life of a
+ *            loop transfer and narrowed again after; that mid-stream switch is
+ *            gone, and with it the requirement that both ends change width on
+ *            exactly the same frame. The ACK still reports the width so a
+ *            mismatched pair of binaries is caught at startup rather than by
+ *            the recording.
+ *
+ *            Slot 0 is the sync slot and is never a route. The recorder planes
+ *            start at FX_FRAME_REC_SLOT_BASE, not at zero - a caller that
+ *            forgets this reads the sync word as channel 0's audio, which is
+ *            exactly the sort of off-by-one this module exists to make
+ *            testable.
  *
  * @version   1.0.0
  *
@@ -99,13 +109,13 @@ extern "C" {
 #define FX_IL_SLOT_WIDTH_MAX            (FX_LOOP_SLOT_QTY_MAX)
 
 /**
- * Widest frame on the wire, in slots.
+ * The frame on the wire, in slots. FIXED - see fx_frame.h.
  *
- * REC_SLOT_QTY recorder slots, plus the loop run while a transfer is running.
- * The frame narrows again when it ends, so this is a ceiling rather than the
- * usual case.
+ * One sync slot, REC_SLOT_QTY recorder planes, and the loop run. This is no
+ * longer a ceiling that the frame climbs to and falls back from: it is the
+ * width, at all times, whether or not a loop transfer is running.
  */
-#define FX_IL_STREAM_WIDTH_MAX          (REC_SLOT_QTY + FX_LOOP_SLOT_QTY_MAX)
+#define FX_IL_STREAM_WIDTH_MAX          (FX_FRAME_SLOT_QTY)
 
 
 

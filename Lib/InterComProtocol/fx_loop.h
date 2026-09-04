@@ -39,6 +39,10 @@
 #include "fx_defs.h"
 #include "fx_protocol.h"
 
+/* FX_FRAME_LOOP_SLOT_QTY - the loop's slots are part of the fixed frame now,
+ * not something a session negotiates. */
+#include "fx_frame.h"
+
 #ifdef __cplusplus
 extern "C" {
 #endif
@@ -48,46 +52,42 @@ extern "C" {
 ***************************************************************************************************/
 
 /**
- * Largest number of extra stream slots a session may ask for.
- *
- * The stream widens to REC_SLOT_QTY + nSlotQty for the life of a transfer, and
- * every slot is 4 bytes at the sample rate, so the SPI cost is linear in this:
- *
- *   slots * 4 B * 48000 Hz * 8 = bits/s
- *      4 ->  6.1 Mbit/s      12 -> 18.4 Mbit/s
- *      8 -> 12.3 Mbit/s      28 -> 43.0 Mbit/s
+ * Loop slots in the frame. Not negotiated - see fx_frame.h.
  *
  * ------------------------------------------------------------------------
- * TWELVE, NOT SIXTEEN, AND THE REASON IS NOT BANDWIDTH
+ * THIS IS NO LONGER A CEILING, IT IS THE LAYOUT
  * ------------------------------------------------------------------------
  *
- * The receiver's SPI ring is a fixed number of WORDS, and its half-transfer
- * interrupt fires at the halfway word. For the de-interleave to work, that
- * halfway point must land on a FRAME boundary - otherwise the callback hands
- * over a half whose last frame is cut in two, and a positionally framed stream
- * has nothing to notice that with.
+ * The frame used to widen for the life of a transfer and narrow again after,
+ * which made this a maximum a session could ask for. It does not any more. The
+ * frame is FX_FRAME_SLOT_QTY slots, always, and the loop occupies
+ * FX_FRAME_LOOP_SLOT_QTY of them whether or not anything is being transferred -
+ * they carry zeros when idle.
  *
- * So the TOTAL width must divide the half-ring exactly. At the interface's
- * REC_RX_WORDS of 8192 that half is 4096 words:
+ * Renegotiating the width mid-stream meant both ends had to switch on precisely
+ * the same frame boundary, on every save and every load. Disagree by one frame
+ * and every slot is rotated permanently, with no framing in the stream to
+ * reveal it. Twenty-seven fixed slots cost 5.2 Mbit/s of zeros at idle and
+ * delete that failure mode outright.
+ *
+ * Twenty-seven because the frame is 32: one sync slot, four recorder planes,
+ * and the rest is loop. 32 was chosen to divide the receiver's 4096-word half
+ * exactly - 128 frames - so the half-transfer interrupt can never land inside a
+ * frame:
  *
  *      total width   frames per half
- *          4            1024.0   OK   (recorder alone)
+ *          4            1024.0   OK   (the old recorder-only frame)
  *          8             512.0   OK
- *         16             256.0   OK   <- 12 loop slots
- *         20             204.8   NO   <- 16 loop slots, does not divide
- *         32             128.0   OK
+ *         16             256.0   OK
+ *         20             204.8   NO   <- does not divide, and was once shipped
+ *         32             128.0   OK   <- this
  *
- * Sixteen loop slots makes the frame 20 wide, which does not divide 4096. It
- * was the first value here and it was wrong: the de-interleave would have been
- * told 1024 frames when the half held 204, reading five times the buffer.
- *
- * Twelve costs a little speed - 2.5 s per 5.5 MiB loop instead of 1.88 - and
- * is correct. Twenty-eight is the next legal step up if the ring grows.
- *
- * The cap also stops a bad or hostile value asking for a frame the link cannot
- * carry; the negotiation grants what it can and reports it back.
+ * At 27 slots a 5.49 MiB stereo take crosses in 1.07 s, against 2.50 s at the
+ * old 12. The session still reports nSlotQty in its OPEN so a future frame can
+ * change without a protocol revision, but both ends now derive it from the
+ * shared frame layout rather than agreeing on it at runtime.
  */
-#define FX_LOOP_SLOT_QTY_MAX            (12U)
+#define FX_LOOP_SLOT_QTY_MAX            (FX_FRAME_LOOP_SLOT_QTY)
 
 /** Bytes per sample on the wire, by PROTO_LOOP_FMT. */
 #define FX_LOOP_BYTES_S24               (3UL)
