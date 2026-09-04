@@ -790,14 +790,14 @@ It never blinks false in the gaps.</pre>
 <h2><span class="num">08</span>Review findings</h2>
 
 <div class="col">
-<p class="lede">Seven things. <strong>R3, R4, R6 and R7 are fixed</strong> — kept here rather than deleted, because a fix with no record of what it fixed is how the same mistake gets made twice. The rest are judgement calls where the current shape is defensible but the cost is real.</p>
+<p class="lede">Eight things. <strong>R3, R4, R6 and R7 are fixed</strong> — kept here rather than deleted, because a fix with no record of what it fixed is how the same mistake gets made twice. <strong>R8 is open and needs hardware.</strong> The rest are judgement calls where the current shape is defensible but the cost is real.</p>
 
-<p>R6 and R7 are the two worth reading if you read only two. Both were live in committed code, both were silent, and both were found by writing this document rather than by testing.</p>
+<p>R6 and R7 are the two worth reading if you read only two. Both were live in committed code, both were silent, and both were found by writing this document rather than by testing. R7 is also worth reading as a caution: its first fix was wrong in the other direction, and applying a correct argument to both boards by symmetry is exactly how that happened.</p>
 </div>
 
 <div class="review fixed">
   <div class="tag"><span class="id">R7</span> defect · fixed · would have blocked bring-up</div>
-  <h4>Three of the four SPI DMA channels were in normal mode, which stops the peripheral</h4>
+  <h4>The two ends need opposite DMA modes, and the reason is not symmetric</h4>
   <p>Circular mode on this link is not about the buffer wrapping. From the HAL:</p>
 <pre><span class="c">stm32h7xx_hal_spi.c — "Set the number of data at current transfer"</span>
 
@@ -808,7 +808,24 @@ else
   <p>With <code>TSIZE</code> set, the peripheral raises EOT and <strong>suspends</strong> after that many frames. The link would have stopped after 8192 words — about <strong>10 ms</strong> — and the already-circular receive ring would never once have wrapped. Everything downstream keeps counting slots as though the stream were still running.</p>
   <p>Worse, the HAL reads the mode off the <strong>TX</strong> channel even in the TransmitReceive path. The interface's TX being <code>DMA_NORMAL</code> gated the whole link on its own, regardless of its RX already being correct.</p>
   <p>Interface TX was also <code>HALFWORD</code> on both sides of the transfer while SPI1 is <code>SPI_DATASIZE_32BIT</code> and the buffer is <code>int32_t</code>. RX had been corrected to <code>WORD</code> in a hand-added USER CODE block; TX never was.</p>
-  <p><strong>What changed.</strong> All four channels circular, all four <code>WORD</code>, fixed <em>in the <code>.ioc</code></em> as well as the generated source — the <code>.ioc</code> being the part that matters, since the RX fix lived only in a USER CODE block that CubeMX drops on regeneration.</p>
+  <p><strong>The correction, which went the wrong way first.</strong> The reasoning above is sound for the <em>slave</em> and was then applied to both boards by symmetry — all four channels circular. That is wrong for the master, and would have wedged it on its first block.</p>
+  <p>The master does not stream. It only ever calls <code>SPI_TP_SendFrame</code> or <code>SPI_TP_SendRecvFrame</code> — finite bursts of 2048 words, one per audio block — and it relies on <code>TxCplt</code> / <code>TxRxCplt</code> firing to clear <code>bTxBusy</code>. With circular TX and therefore <code>TSIZE = 0</code>, that burst never ends, the callback never fires, <code>bTxBusy</code> latches, and every later block is refused as <code>RESULT_BUSY</code> while the peripheral keeps clocking.</p>
+  <p>So the modes are opposite <strong>by design, not by oversight</strong>, and neither board's setting should be propagated to the other:</p>
+<pre>audio  (master)   DMA_NORMAL     TSIZE = Size   finite burst per block, EOT is "frame done"
+iface  (slave)    DMA_CIRCULAR   TSIZE = 0      one endless transfer, armed once, never re-armed</pre>
+  <p>All four channels are <code>WORD</code>. Everything is fixed <em>in the <code>.ioc</code></em> as well as the generated source — the <code>.ioc</code> being the part that matters, since the RX fix lived only in a USER CODE block that CubeMX drops on regeneration.</p>
+  <p>Note what the burst size buys: 2048 words is 64 frames exactly, and a half-ring is 4096 words is 128 frames. So a burst is always a whole number of frames and a half is always two bursts. A <em>dropped</em> burst therefore costs 64 frames and leaves alignment intact — and the sequence counter reports the gap as exactly 64. Frame loss and rotation stay distinguishable even when the master skips a block.</p>
+</div>
+
+<div class="review crit">
+  <div class="tag"><span class="id">R8</span> open · needs an oscilloscope · could rotate the stream</div>
+  <h4>NSS deasserts between bursts, and the slave is inside one endless transfer</h4>
+  <p>This falls straight out of R7. The master drives <code>SPI_NSS_HARD_OUTPUT</code>, so its peripheral asserts NSS when a burst begins and releases it at EOT — low, high, low, high, once per burst, every 1.33 ms. The slave is <code>SPI_NSS_HARD_INPUT</code> and believes it is inside a single transfer that runs for the life of the device.</p>
+  <p><strong>The question.</strong> When the slave's NSS input goes high between bursts, does it (a) pause and resume cleanly on the next burst, or (b) treat it as end-of-transfer and tear down, error, or reset its internal word counter?</p>
+  <p>If (b), the endless transfer either dies after the first burst or resynchronises its counter so each burst lands at a different phase — a permanent silent rotation, which is the failure this entire frame design exists to catch. It <em>would</em> be caught. You would simply have a link that reports faults continuously and records nothing.</p>
+  <p><strong>What to discount.</strong> An earlier review flagged <code>SPI_NSS_PULSE_ENABLE</code> on the master — NSS pulsing between every individual word — as the danger. That should not fire: <code>CFG2.SSOM</code> only interleaves those pulses when <code>MIDI &gt; 1</code>, and <code>MasterInterDataIdleness</code> is <code>00CYCLE</code> here. Right instinct, wrong mechanism. The exposure is between <em>bursts</em>, not between words.</p>
+  <p><strong>How to settle it.</strong> Two probes on the interface's SPI1 pins — NSS (driven from the audio side's PG10) and SCK — triggered on NSS rising. Does NSS actually go high between bursts, how long is the gap, and does SCK stop cleanly. The half that needs no scope: run the link and watch <code>FxFrame_Scan</code>. A non-zero phase reported at roughly the burst rate is the answer.</p>
+  <p><strong>If it is (b).</strong> Restructuring the master to arm once and fill halves — the way the slave already works — holds NSS low permanently and deletes the question. It is a larger change than it sounds, because <code>RecSpi_PushBlock</code>, <code>RecStream_Stage</code> and the <code>bTxBusy</code> handshake are all built around finite bursts, but it is the structurally cleaner arrangement for a positionally framed stream.</p>
 </div>
 
 <div class="review fixed">
@@ -1007,7 +1024,8 @@ SDRAM bank 2  <span class="c">.sdram_loop_b</span>   looper 1, planes 2-3   take
 <footer>
 FXcursion · SPI1 transport reference · SystemSW/Lib/InterComProtocol/doc · 04.09.2026<br>
 Frame arithmetic at 48 kHz, 64 frames per audio block, 32-bit slots throughout.<br>
-R3 and R4 fixed and verified against the host suite; R5–R7 recorded so the reasoning is not lost.
+R3, R4, R6 and R7 fixed and verified against the host suite; R5 and R8 open, R8 needing a scope.<br>
+Chapters 09 and 10 mark where this transport meets code neither board has written yet.
 </footer>
 
 </div>
