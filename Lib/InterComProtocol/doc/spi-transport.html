@@ -650,8 +650,8 @@ Every channel is in the wrong file from that moment on.</pre>
   <div><dt>Frame</dt><dd>32 slots, fixed</dd></div>
   <div><dt>Wire</dt><dd>6.14 MB/s</dd></div>
   <div><dt>Burst / block</dt><dd>51 %</dd></div>
-  <div><dt>Loop rate</dt><dd>5.38 MB/s</dd></div>
-  <div><dt>One 20 s take</dt><dd>1.07 s</dd></div>
+  <div><dt>Loop rate</dt><dd>5.184 MB/s</dd></div>
+  <div><dt>One 20 s take</dt><dd>1.11 s</dd></div>
 </dl>
 
 <div class="col">
@@ -664,7 +664,7 @@ Every channel is in the wrong file from that moment on.</pre>
   <thead><tr><th>Quantity</th><th class="n">Value</th><th>Varies with frame width?</th></tr></thead>
   <tbody>
     <tr><td class="k">wire, total</td><td class="n">6.14 MB/s</td><td><strong>yes</strong> — 192 kB/s per slot</td></tr>
-    <tr><td class="k">loop payload rate</td><td class="n">5.38 MB/s</td><td><strong>yes</strong> — this is what a wider frame buys</td></tr>
+    <tr><td class="k">loop payload rate</td><td class="n">5.184 MB/s</td><td><strong>yes</strong> — this is what a wider frame buys</td></tr>
     <tr><td class="k">half-buffer interrupt</td><td class="n">every 2.67 ms</td><td><strong>yes</strong> — 4096 words fill faster</td></tr>
     <tr><td class="k">recorder → SDRAM</td><td class="n">768 kB/s</td><td>no — 4 planes at 48 kHz regardless</td></tr>
     <tr><td class="k">recorder → card, packed 24-bit</td><td class="n">576 kB/s</td><td>no</td></tr>
@@ -674,7 +674,7 @@ Every channel is in the wrong file from that moment on.</pre>
 </div>
 
 <div class="col">
-<p>So a save is <em>crossing plus card</em>: 1.07 s on the wire, then however long the card needs for 5.49 MiB. Past 32 slots the wire stops being the bottleneck — which is another reason not to look for a wider frame.</p>
+<p>So a save is <em>crossing plus card</em>: 1.11 s on the wire, then however long the card needs for 5.49 MiB. Past 32 slots the wire stops being the bottleneck — which is another reason not to look for a wider frame.</p>
 
 <div class="review">
   <div class="tag"><span class="id">note</span> the card figure is not measured</div>
