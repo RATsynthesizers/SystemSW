@@ -888,6 +888,122 @@ block budget        = 639,840 cycles      <b>≈ 13%</b></pre>
 
 <hr class="rule-hard">
 
+<section>
+<h2><span class="num">09</span>The interface's looper API</h2>
+
+<div class="col">
+<p class="lede">Everything the GUI needs already exists and is callable. What does not exist is anything <em>calling</em> it. This chapter is the list of functions a TouchGFX screen binds to, and the two calls whose absence currently makes the whole transport inert.</p>
+</div>
+
+<div class="tw">
+<table>
+  <caption>What a looper screen calls — interface side</caption>
+  <thead><tr><th>Function</th><th>What it does</th><th>Called today?</th></tr></thead>
+  <tbody>
+    <tr class="loop"><td class="k">LoopSession_StartSave<br>(nLooper, nPlaneQty, pName)</td>
+      <td>Acquires a spool slot, arms the loop destination to the rounded-up length, sends <code>LOOP_OPEN</code> then <code>LOOP_CTL(START)</code>. Returns immediately; the transfer runs in the background.</td>
+      <td><strong>no</strong> — bind to the save button</td></tr>
+    <tr class="loop"><td class="k">LoopSession_StartLoad<br>(pName, nLooper)</td>
+      <td>Reads the WAV off the card into a spool slot, then streams it to the audio board on MISO. <strong>Blocks on the SD card</strong> while it reads.</td>
+      <td><strong>no</strong> — bind to the load button</td></tr>
+    <tr><td class="k">CtrlLinkIf_Stream(TRUE)</td>
+      <td>Tells the audio board to start clocking the SPI bus at all. Until this arrives, <code>RecStream_IsEnabled()</code> is false and no byte moves in either direction.</td>
+      <td><strong>no</strong> — see below</td></tr>
+    <tr><td class="k">CtrlLinkIf_Transport<br>(nChain, eAction)</td>
+      <td>record / overdub / play / stop / clear on one chain. This is the <em>local</em> looper on the audio board, nothing to do with the card.</td>
+      <td>yes, one call site</td></tr>
+    <tr class="loop"><td class="k">LoopSession_IsBusy()</td>
+      <td>A transfer is open. Drive the "saving" spinner from this.</td><td>available</td></tr>
+    <tr class="loop"><td class="k">LoopSession_LastResult()<br>LoopSession_Failures()</td>
+      <td>Why the last session ended — <code>PROTO_RES_OK</code>, <code>_TIMEOUT</code>, <code>_NO_SPACE</code>, or a CRC mismatch — and a running count.</td>
+      <td>available</td></tr>
+    <tr class="rec"><td class="k">LoopSpool_IsBusy()<br>LoopSpool_PendingQty()</td>
+      <td>The card is committing a loop, or one is queued behind it. This is the boolean the "writing" icon wants, and it stays true until the recorder has drained.</td>
+      <td>available</td></tr>
+    <tr><td class="k">LoopSession_Poll()<br>LoopSession_OnStat()</td>
+      <td>Advance the state machine; take the peer's report. Internal plumbing, already wired.</td>
+      <td>yes, CtrlLink task</td></tr>
+  </tbody>
+</table>
+</div>
+
+<div class="col">
+<h3>What still has to be written here</h3>
+<p><strong>The STREAM call.</strong> Put it in the CtrlLink task on the dead&rarr;alive edge, beside the existing <code>pushConfig</code>, not in <code>RecorderInit</code> — otherwise an audio-board reboot comes up with streaming off and nothing ever turns it back on. Gate it on <code>tLastAck.nStreamWidth == FX_FRAME_SLOT_QTY</code> so two boards built from different commits refuse each other instead of streaming a rotated frame.</p>
+<p><strong>A command queue between the GUI and CtrlLink.</strong> <code>LoopSession_StartLoad</code> blocks on the card, so it must never be called from <code>tick()</code> or the TouchGFX task — that stalls the display for as long as the read takes. The screen posts an intent; the CtrlLink task performs it.</p>
+<p><strong>Telemetry into the widgets.</strong> <code>aTransport[]</code>, <code>aLoopPos[]</code> and <code>aLoopLen[]</code> arrive over the UART link but nothing surfaces them to a screen, so a progress bar has nothing to read.</p>
+
+<div class="review">
+  <div class="tag"><span class="id">gap</span> there is no abort</div>
+  <p>Nothing sends <code>LOOP_ACT_ABORT</code>. A user who starts a save cannot cancel it; they wait for the stall watchdog (3 s without progress) or for the transfer to finish. Add <code>LoopSession_Abort()</code> before shipping a cancel button, not after.</p>
+</div>
+</div>
+</section>
+
+<section>
+<h2><span class="num">10</span>The audio side: commands in, buffers underneath</h2>
+
+<div class="col">
+<p class="lede">The audio board never initiates a transfer. It answers. Its whole role is: accept an OPEN, agree or refuse the geometry, then move 27 slots per frame between the wire and SDRAM until the byte count is met — and report what it thinks happened.</p>
+</div>
+
+<div class="tw">
+<table>
+  <caption>What the audio side receives and provides</caption>
+  <thead><tr><th>Function</th><th>Role</th><th>Called today?</th></tr></thead>
+  <tbody>
+    <tr class="loop"><td class="k">LoopXfer_OnOpen<br>(pOpen, pStat)</td>
+      <td>Handles <code>LOOP_OPEN</code>. Checks direction, format and slot count — must be exactly 27 and <code>LOOP_FMT_S24</code> — and fills the reply.</td>
+      <td>yes, command dispatch</td></tr>
+    <tr class="loop"><td class="k">LoopXfer_OnCtl(pCtl)</td>
+      <td>Handles <code>LOOP_CTL</code>: START arms the block budget, ABORT fails the session.</td>
+      <td>yes, command dispatch</td></tr>
+    <tr class="loop"><td class="k">LoopXfer_Block<br>(pSlots, nFrames, nStride)</td>
+      <td>The engine. Once per audio block, packs 4 payload bytes into each of the 27 loop slots on a SAVE, or unpacks them out of the received words on a LOAD.</td>
+      <td>yes, <code>RecSpi_PushBlock</code></td></tr>
+    <tr class="loop"><td class="k">LoopXfer_TakeCompletion<br>(pStat)</td>
+      <td>One-shot latch: a session reached a terminal state. Drives the unsolicited <code>LOOP_STAT</code> that carries this side's CRC-32 to the interface.</td>
+      <td>yes</td></tr>
+    <tr class="rec"><td class="k">LoopMem_PlaneBase<br>(nPlane, LOOP_COPY_TAKE)</td>
+      <td><strong>This is the buffer.</strong> Base of one plane's take in SDRAM — what a SAVE reads and what a LOAD writes.</td>
+      <td>yes, inside LoopXfer</td></tr>
+    <tr class="rec"><td class="k">LoopMem_PlaneBytes()</td>
+      <td>2 880 000 B per plane-copy — 20 s of packed 24-bit at 48 kHz.</td>
+      <td>yes</td></tr>
+    <tr><td class="k">Looper_Transport<br>(nChain, eAction)</td>
+      <td>The local looper: record, overdub, play, stop, clear. Independent of the transport.</td>
+      <td>yes</td></tr>
+    <tr><td class="k">LoopMem_Snapshot<br>(nLooper, nFrames, bRestore)</td>
+      <td>Copies the take to the undo buffer or back. Not part of the transport.</td>
+      <td><strong>no</strong> — undo UI unwritten</td></tr>
+  </tbody>
+</table>
+</div>
+
+<div class="col">
+<h3>Where the bytes actually live</h3>
+<p>Two banks, one looper each, so a save out of one never contends with playback from the other:</p>
+<pre>SDRAM bank 1  <span class="c">.sdram_loop_a</span>   looper 0, planes 0-1   take + undo   11 MiB
+SDRAM bank 2  <span class="c">.sdram_loop_b</span>   looper 1, planes 2-3   take + undo   11 MiB
+
+  one plane-copy   2 880 000 B   = 20 s x 48000 x 3 B
+  stereo take      5 760 000 B   = the payload that crosses the wire
+  undo copy        never crosses - it is local history</pre>
+<p>A SAVE walks <code>LOOP_COPY_TAKE</code> of both planes as one contiguous byte run; a LOAD writes the same run back. The undo copy is never transmitted, which is why an 11 MiB region holds a 5.49 MiB transfer.</p>
+
+<h3>What still has to be written here</h3>
+<p><strong>Nothing validates a loaded take.</strong> <code>LoopXfer_Block</code> lands the bytes in SDRAM and the CRC confirms they arrived intact — but no code then tells the looper that plane now holds 20 seconds of audio and is playable. After a LOAD completes, something must set the take's length and mark the plane valid, or the user loads a loop and hears nothing.</p>
+<p><strong>Undo is storage-only.</strong> <code>LoopMem_Snapshot</code> works and is tested; no command reaches it.</p>
+
+<div class="review">
+  <div class="tag"><span class="id">note</span> the transport is symmetric, the wiring is not</div>
+  <p>Both directions are implemented in <code>LoopXfer_Block</code> and both are exercised by the host suite. The asymmetry is above it: a SAVE ends with bytes on a card, which is a complete story, while a LOAD ends with bytes in SDRAM that nothing has been told about. That is the single largest piece of unwritten code on this side.</p>
+</div>
+</div>
+</section>
+
+<hr class="rule-hard">
+
 <footer>
 FXcursion · SPI1 transport reference · SystemSW/Lib/InterComProtocol/doc · 04.09.2026<br>
 Frame arithmetic at 48 kHz, 64 frames per audio block, 32-bit slots throughout.<br>
