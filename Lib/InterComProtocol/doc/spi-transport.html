@@ -308,21 +308,23 @@ ul.tight li { margin-bottom: 7px; }
 <header class="mast">
   <p class="kicker">FXcursion · interface ↔ audio · SPI1</p>
   <h1>One Wire,<br>Three Streams</h1>
-  <p class="deck">The recorder, the live looper and the loop file share a single SPI link with no length, no CRC, and no way to tell one slot from another except by counting. Everything that looks over-engineered in this code exists because of that one fact — including the two slots per frame now spent making it safe and placeable. Here is the whole protocol, and an honest list of what could be simpler.</p>
+  <p class="deck">Three streams share one SPI link on a fixed 32-slot frame that never negotiates: a predictable mark and sequence in every frame, a loop position and generation in every frame, CRC-32 end to end on the payload, and nine static asserts that refuse to build a geometry which could not work. Two slots in thirty-two buy all of it. Here is the whole protocol, and an honest list of what could still be simpler.</p>
 </header>
 
 <div class="col">
-<p class="lede">The code looks bloated in places, and some of it was. Twelve findings are marked below; <strong>six have been fixed</strong> — including one that was corrupting three quarters of every recording during a loop save, and one that would have stopped the link five milliseconds after boot — and the rest are judgement calls left in place with the reasoning recorded. Most of the remaining bulk is one constraint pushing outward, and it is worth seeing that constraint clearly before deciding what to cut.</p>
+<p class="lede">Some of this code is defensive and some of it was genuinely bloated. Twelve findings are marked below; <strong>six have been fixed</strong> — including one that was corrupting three quarters of every recording during a loop save, and one that would have stopped the link five milliseconds after boot — and the rest are judgement calls left in place with the reasoning recorded. Most of the remaining bulk is one constraint pushing outward, and it is worth seeing that constraint clearly before deciding what to cut.</p>
 </div>
 
 <!-- ============================================================= -->
 <section>
-<h2><span class="num">01</span>The constraint everything follows from</h2>
+<h2><span class="num">01</span>What the frame guarantees, and the one thing it cannot</h2>
 
 <div class="col">
 <p>SPI1 carries a <strong>continuous, positionally framed stream</strong>. The audio board sends one frame per audio block, forever. The interface knows which sample belongs to which channel purely by <em class="term">counting</em> — a slot is channel 2's because it is the fourth word to arrive, not because anything in it says so.</p>
 
-<p>There is no length to validate and no CRC to fail. That makes it fast, and it makes it fragile in exactly one way:</p>
+<p>Positional does not mean unprotected. The frame is a <strong>fixed, deterministic 32 slots</strong> that divides the receive ring exactly, every frame carries a word the receiver can predict, every loop payload is CRC-32 checked end to end against the sender's own figure, the control link is CRC-16 framed, and nine static asserts refuse to build a geometry that could not work. What the stream does <em>not</em> have is a length field, because it does not need one — the length is a compile-time constant both boards assert on.</p>
+
+<p>The one thing counting alone cannot survive is a slip:</p>
 
 <pre><b>Lose a single 32-bit word and every slot is permanently rotated.</b>
 The stream keeps flowing. The data keeps looking like audio.
@@ -337,7 +339,20 @@ Every channel is in the wrong file from that moment on.</pre>
   <li>The frame width is <strong>fixed and never negotiated</strong>, because changing it mid-stream needs both ends to switch on the same frame — and that is the rotation above, deliberately invited, twice per loop.</li>
 </ul>
 
-<p><strong>One thing has changed since that paragraph was first written.</strong> The stream now carries a <a href="#" style="color:var(--sync);text-decoration:none;border-bottom:1px solid var(--sync)">sync slot</a> — one word per frame that the receiver can predict. A rotation is still just as destructive, but it is no longer <em>invisible</em>: it is caught within one frame, counted, localised to a word offset, and the affected audio is replaced with silence rather than with someone else's channel. Everything above still holds. What follows from it is now a fault you can see.</p>
+<p>Those four are how the stream avoids ever slipping. The <a href="#" style="color:var(--sync);text-decoration:none;border-bottom:1px solid var(--sync)">sync slot</a> is how it proves it has not — one word per frame the receiver predicts, so a rotation is caught within a single frame, localised to a word offset, and the affected audio replaced with silence rather than with someone else's channel.</p>
+
+<p>And the two failure modes are <strong>told apart</strong>, which is the part worth knowing. A wrong mark means the stream is rotated and <code>nPhase</code> says by how many words. A right mark with a jumped sequence means whole frames were lost and <code>nSeqGap</code> says how many. Those have different causes and different fixes, and the frame reports which one happened rather than merely that something did.</p>
+
+<pre><span class="c">what the protocol actually guarantees</span>
+
+frame length      <b>32 slots, fixed</b>     compile-time, asserted on both boards
+frame identity    <b>mark 0xFB5A</b>        one word, every frame
+frame ordering    <b>seq 16-bit</b>         a gap measures frames lost
+loop position     <b>pos 23-bit</b>         per frame, per looper, alternating
+take generation   <b>gen 4-bit</b>          invalidates on undo, clear, resize
+loop payload      <b>CRC-32</b>             end to end, compared with the sender
+control link      <b>CRC-16/CCITT</b>       length + command + payload
+geometry          <b>9 static asserts</b>   a bad frame width will not build</pre>
 </div>
 </section>
 
