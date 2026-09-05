@@ -41,22 +41,35 @@
  *            THE LAYOUT - FIXED, ALWAYS
  *            ------------------------------------------------------------------
  *
- *                slot   0         1   2   3   4      5 ............... 31
- *                     [SYNC]    [R0][R1][R2][R3]   [L0][L1] ....... [L26]
- *                       |         \________ ___/     \_______ ______/
- *                       |                  v                 v
- *                       |          4 recorder planes   27 loop slots
- *                       |
- *                       +-- mark:16 | seq:16
+ *              slot  0      1 2 3 4     5 6 7 8      9       10 ......... 31
+ *                  [SYNC]  [R0..R3]   [V0..V3]   [STAT]   [F0] ..... [F21]
+ *                    |         |          |         |         |
+ *                    |         |          |         |         +- loop FILE, 22
+ *                    |         |          |         |            opaque bytes,
+ *                    |         |          |         |            4 per slot
+ *                    |         |          |         +- one looper per frame,
+ *                    |         |          |            alternating
+ *                    |         |          +- 4 LIVE looper planes, always on
+ *                    |         +- 4 recorder planes
+ *                    +- mark:16 | seq:16
  *
  *            32 slots x 4 bytes = 128 bytes per frame, at 48 kHz:
  *
  *                6.144 MB/s on the wire, 51.2% of the 96 MHz link
  *                4096-word half / 32 = 128 frames, exactly - see below
  *
+ *            EVERY SLOT NOW HAS A JOB. The live planes exist because a loop
+ *            being recorded lives only in audio SDRAM, so the interface - which
+ *            owns the display, the card and the looper SDRAM - had no way to
+ *            draw its waveform. Streaming it continuously costs four slots and
+ *            removes the need to ship the audio a second time just to see it.
+ *
+ *            The file run pays for them: 27 -> 22 slots, so a full-length take
+ *            crosses in 1.364 s instead of 1.111 s. That is the whole cost.
+ *
  *            THE WIDTH NEVER CHANGES. It is 32 whether or not a loop transfer is
- *            running; the loop slots simply carry zeros when idle. That costs
- *            5.4 MB/s of zeros at idle and is worth every byte, because the
+ *            running; the file slots simply carry zeros when idle. That costs
+ *            4.2 MB/s of zeros at idle and is worth every byte, because the
  *            alternative was renegotiating the frame width mid-stream on every
  *            loop save and load. Both ends had to switch on precisely the same
  *            frame boundary, and if they ever disagreed the result was the exact
@@ -148,12 +161,60 @@ extern "C" {
 #define FX_FRAME_SYNC_SLOT              (0U)
 #define FX_FRAME_SYNC_SLOT_QTY          (1U)
 
-/** Recorder planes follow the sync slot. */
+/** Recorder planes follow the sync slot. One 24-bit sample per slot. */
 #define FX_FRAME_REC_SLOT_BASE          (1U)
 #define FX_FRAME_REC_SLOT_QTY           (4U)
 
-/** The loop payload occupies everything left. */
-#define FX_FRAME_LOOP_SLOT_BASE         (FX_FRAME_REC_SLOT_BASE + FX_FRAME_REC_SLOT_QTY)
+/**
+ * LIVE LOOPER PLANES - the same shape as the recorder's, and always present.
+ *
+ * The recorder and the looper are separate chain blocks and can sit at
+ * different points, so these carry genuinely different audio from slots 1..4 -
+ * a looper at the head of a chain and a recorder at its tail see different
+ * signal, and no wire arrangement could share them.
+ *
+ * Positional like the recorder's, NOT the opaque byte stream the file slots
+ * use: the receiver has to separate loopers by hardware, and only a positional
+ * layout lets the MDMA do it without a CPU pass.
+ */
+#define FX_FRAME_LIVE_SLOT_BASE         (FX_FRAME_REC_SLOT_BASE + FX_FRAME_REC_SLOT_QTY)
+#define FX_FRAME_LIVE_SLOT_QTY          (4U)
+
+/**
+ * LOOP STATUS - one looper described per frame, alternating.
+ *
+ * Without this the live planes above are unusable. The take is a ring at a
+ * moving head, so a live sample carries no inherent position; the only position
+ * on the wire was PROTO_TELEMETRY.aLoopPos, which is 40 ms coarse and
+ * last-writer-wins between the two chains of a pair. And an UNDO or a CLEAR on
+ * the audio side rewrites the take with nothing marking the moment, so a
+ * receiver would keep drawing peaks that are no longer true.
+ *
+ * One slot per frame fixes both. Alternating gives each looper 24 000 updates
+ * per second, which is 480 times the telemetry rate it replaces.
+ */
+#define FX_FRAME_STAT_SLOT              (FX_FRAME_LIVE_SLOT_BASE + FX_FRAME_LIVE_SLOT_QTY)
+#define FX_FRAME_STAT_SLOT_QTY          (1U)
+
+/**
+ * The loop FILE payload occupies everything left: 22 slots.
+ *
+ * 22 is not what was left over - it is what makes the destination arithmetic
+ * exact. The interface arms the loop destination to a whole number of route
+ * steps, one step being FX_FRAME_LOOP_SLOT_QTY * 128 frames * 4 bytes, and
+ * refuses a session whose rounded-up length exceeds the 5632 KiB staging slot.
+ *
+ *     step   22 * 128 * 4 = 11 264 = 11 * 2^10
+ *     slot   5632 KiB     = 5 767 168 = 11 * 2^19
+ *     slot / step         = 512 EXACTLY
+ *
+ * Both share the factor 11, so the worst-case round-up lands precisely on the
+ * end of the buffer and NO loop length can ever be refused. At 27 it happened
+ * to fit because the longest take sat under a multiple; at 23 the same
+ * arithmetic put it 3 072 bytes past the end and a full-length take became
+ * unsaveable. 22 removes the coincidence.
+ */
+#define FX_FRAME_LOOP_SLOT_BASE         (FX_FRAME_STAT_SLOT + FX_FRAME_STAT_SLOT_QTY)
 #define FX_FRAME_LOOP_SLOT_QTY          (FX_FRAME_SLOT_QTY - FX_FRAME_LOOP_SLOT_BASE)
 
 /**
@@ -172,6 +233,54 @@ extern "C" {
 /** Take the mark and the sequence number back out of a received word. */
 #define FX_FRAME_MARK_OF(w)             ((U16)(((U32)(w) >> 16) & 0xFFFFUL))
 #define FX_FRAME_SEQ_OF(w)              ((U16)((U32)(w) & 0xFFFFUL))
+
+
+/***************************************************************************************************
+* The loop status word - slot FX_FRAME_STAT_SLOT
+***************************************************************************************************/
+
+/*
+ *  31   30 ............................. 8   7 ..... 4   3 ..... 0
+ * +----+-----------------------------------+-----------+-----------+
+ * | sel|            pos : 23                | gen : 4   | state : 4 |
+ * +----+-----------------------------------+-----------+-----------+
+ *
+ * sel    which looper this frame describes. Explicit rather than derived from
+ *        the sequence number's parity: a dropped block advances nSeq by a whole
+ *        block, so parity survives today, but nothing should depend on that.
+ * pos    playhead in frames. 8 388 608 against 960 000 for a 20 s loop - 8.7x
+ *        headroom, so a longer LOOP_MAX_SEC does not silently wrap it.
+ * gen    bumped on CLEAR, UNDO, or any length change. The receiver compares it
+ *        with the last one it saw and throws away everything it had drawn when
+ *        it differs. Four bits wrap after 16 events, which cannot be missed at
+ *        24 000 samples per second per looper.
+ * state  transport state, PROTO_TRANSPORT_ACT values.
+ */
+
+#define FX_FRAME_STAT_SEL_SHIFT         (31U)
+#define FX_FRAME_STAT_POS_SHIFT         (8U)
+#define FX_FRAME_STAT_POS_MASK          (0x7FFFFFUL)
+#define FX_FRAME_STAT_GEN_SHIFT         (4U)
+#define FX_FRAME_STAT_GEN_MASK          (0xFUL)
+#define FX_FRAME_STAT_STATE_MASK        (0xFUL)
+
+/** Largest playhead the status word can carry, in frames. */
+#define FX_FRAME_STAT_POS_MAX           (FX_FRAME_STAT_POS_MASK)
+
+/** Build the status word for one looper. */
+#define FX_FRAME_STAT_WORD(sel, pos, gen, state)                                            \
+            ((S32)(U32)((((U32)(sel) & 1UL) << FX_FRAME_STAT_SEL_SHIFT)                     \
+                      | (((U32)(pos) & FX_FRAME_STAT_POS_MASK) << FX_FRAME_STAT_POS_SHIFT)  \
+                      | (((U32)(gen) & FX_FRAME_STAT_GEN_MASK) << FX_FRAME_STAT_GEN_SHIFT)  \
+                      | ((U32)(state) & FX_FRAME_STAT_STATE_MASK)))
+
+/** Take the fields back out. */
+#define FX_FRAME_STAT_SEL_OF(w)         ((U8)(((U32)(w) >> FX_FRAME_STAT_SEL_SHIFT) & 1UL))
+#define FX_FRAME_STAT_POS_OF(w)         ((U32)(((U32)(w) >> FX_FRAME_STAT_POS_SHIFT)        \
+                                               & FX_FRAME_STAT_POS_MASK))
+#define FX_FRAME_STAT_GEN_OF(w)         ((U8)(((U32)(w) >> FX_FRAME_STAT_GEN_SHIFT)         \
+                                              & FX_FRAME_STAT_GEN_MASK))
+#define FX_FRAME_STAT_STATE_OF(w)       ((U8)((U32)(w) & FX_FRAME_STAT_STATE_MASK))
 
 /**
  * Pass as nExpectSeq to accept whatever sequence number arrives.
