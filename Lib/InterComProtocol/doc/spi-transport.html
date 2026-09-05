@@ -320,7 +320,7 @@ ul.tight li { margin-bottom: 7px; }
 <h2><span class="num">01</span>What the frame guarantees, and the one thing it cannot</h2>
 
 <div class="col">
-<p>SPI1 carries a <strong>continuous, positionally framed stream</strong>. The audio board sends one frame per audio block, forever. The interface knows which sample belongs to which channel purely by <em class="term">counting</em> — a slot is channel 2's because it is the fourth word to arrive, not because anything in it says so.</p>
+<p>SPI1 carries a <strong>continuous, positionally framed stream</strong>. The audio board sends 64 frames per audio block, one per sample period, forever. The interface knows which sample belongs to which channel purely by <em class="term">counting</em> — a slot is channel 2's because it is the fourth word to arrive, not because anything in it says so.</p>
 
 <p>Positional does not mean unprotected. The frame is a <strong>fixed, deterministic 32 slots</strong> that divides the receive ring exactly, every frame carries a word the receiver can predict, every loop payload is CRC-32 checked end to end against the sender's own figure, the control link is CRC-16 framed, and nine static asserts refuse to build a geometry that could not work. What the stream does <em>not</em> have is a length field, because it does not need one — the length is a compile-time constant both boards assert on.</p>
 
@@ -435,14 +435,14 @@ slot   5632 KiB     = <b>5 767 168</b>  = 11 x 2^19
 
 <p>The price is 22 slots of zeros on an idle link: 4.2 MB/s of the 12 available, spent to delete a failure mode. A fixed width also makes the receiver's geometry a compile-time constant — 128 frames per half, not a division by a number that arrived in a handshake.</p>
 
-<p><strong>Thirty-two, and not any number you like.</strong> The receiver's ring is a fixed count of words and its half-transfer interrupt fires at the halfway word, so the width has to divide that half exactly — otherwise the boundary lands mid-frame and everything after it is rotated. At 4096 words per half the divisors are 8, 16 and 32. Thirty-two is the widest, which makes the loop as fast as the wire allows.</p>
+<p><strong>Thirty-two, and not any number you like.</strong> Two constraints meet here. The width must divide the receiver's 4096-word half, or the half-transfer interrupt lands mid-frame and everything after it is rotated — that admits 8, 16, 32 and 64. And the burst must fit inside the block: 64 slots would be 12.288 MB/s, <strong>102% of a 96 MHz link</strong>, so it cannot be sent at all. Thirty-two is the widest that satisfies both, which makes the loop as fast as the wire allows.</p>
 
 <p>The five regions of the frame are read completely differently, and that difference explains most of the code:</p>
 </div>
 
 <div class="tw col" style="max-width:none">
 <table>
-  <caption>The same wire, three meanings</caption>
+  <caption>The same wire, five meanings</caption>
   <thead><tr><th>&nbsp;</th><th>Sync</th><th>Recorder</th><th>Live looper</th><th>Status</th><th>Loop file</th></tr></thead>
   <tbody>
     <tr>
@@ -463,7 +463,7 @@ slot   5632 KiB     = <b>5 767 168</b>  = 11 x 2^19
     </tr>
     <tr>
       <td class="k">why it exists</td>
-      <td>so a rotated stream is <em>detectable</em>. Nothing else in the frame can be checked against anything.</td>
+      <td>so a rotated stream is <em>detectable</em>, and told apart from a lost one</td>
       <td>the receiver de-interleaves by position, so a sample must sit in a known slot</td>
       <td>the interface must draw a loop it has never otherwise seen</td>
       <td>a live sample is unplaceable without a position, and undo rewrites the take silently</td>
@@ -509,7 +509,7 @@ slot   5632 KiB     = <b>5 767 168</b>  = 11 x 2^19
 <div class="col">
 <p class="lede">One slot in thirty-two, spent buying the difference between a fault you can see and a fault you cannot.</p>
 
-<p>Section 01 is about a stream with no framing: lose one word and every slot is rotated forever, silently, with plausible audio in every channel. The sync slot is the answer to it. It carries a value the receiver knows in advance, so a rotation stops being invisible.</p>
+<p>Section 01 named the one thing counting alone cannot survive: lose one word and every slot is rotated forever, silently, with plausible audio in every channel. This slot is the answer. It carries a value the receiver knows in advance, so a rotation stops being invisible — and, with the sequence number beside it, stops being confusable with a different fault.</p>
 </div>
 
 <div class="band">
@@ -669,7 +669,7 @@ slot   5632 KiB     = <b>5 767 168</b>  = 11 x 2^19
       <td>It is the only place that knows about both streams. Everything either side of it knows about exactly one.</td></tr>
     <tr class="loop"><td class="k">loop_xfer.c</td>
       <td>Turn a loop in SDRAM into bytes in slots, and back.</td>
-      <td>This is the answer to "why does it have those functions". It is a <em>codec</em>, not a manager: <code>OnOpen</code> and <code>OnCtl</code> answer the two protocol messages, <code>StreamWidth</code> reports how wide the frame must be, <code>Block</code> moves one block's worth. Four entry points, one per thing that can happen to it.</td></tr>
+      <td>This is the answer to "why does it have those functions". It is a <em>codec</em>, not a manager: <code>OnOpen</code> and <code>OnCtl</code> answer the two protocol messages, <code>StreamWidth</code> reports how wide the frame must be, <code>Block</code> moves one block's worth. Seven entry points, four of which do work — <code>Init</code>, <code>OnOpen</code>, <code>OnCtl</code>, <code>Block</code> — while <code>IsRunning</code>, <code>Report</code> and <code>TakeCompletion</code> only report.</td></tr>
     <tr class="loop"><td class="k">loop_mem.c</td>
       <td>Own the loop buffers and a one-block DTCM window onto them.</td>
       <td>The window survives because the loop <em>wraps</em>: a block straddling the loop end is two runs in memory, and every caller handling that itself is how a click at the loop point appears at some lengths and not others.</td></tr>
@@ -712,7 +712,7 @@ slot   5632 KiB     = <b>5 767 168</b>  = 11 x 2^19
     <tr><td class="k">fx_frame.c</td><td><code>FxFrame_Scan</code> — checks slot 0 of every frame and says <em>what</em> was wrong, not just that something was. Lives here rather than in the receiver's ISR because it decides whether audio is kept or discarded, and the failure it guards against does not crash: the only way to know it works is to feed it a rotated buffer on a PC and watch it say so, which <code>test_frame.c</code> does.</td></tr>
     <tr><td class="k">fx_loop.c</td><td>The session state machine. <strong>Both boards run this same code</strong>, which is why a byte count is wrong on both or on neither.</td></tr>
     <tr><td class="k">fx_interleave.c</td><td>Frame geometry: given a slot, a width and a stream width, where are those bytes and how far apart. The one place the layout is computed.</td></tr>
-    <tr><td class="k">fx_crc.c</td><td><code>Crc32_Ieee</code> — the ordinary CRC32, so a saved loop can be checked with a desktop tool.</td></tr>
+    <tr><td class="k">fx_crc.c</td><td><code>Crc32_Ieee</code> for loop payloads — the ordinary CRC32, so a saved loop can be checked with a desktop tool — and <code>Crc16_Ccitt</code> for the control link's frames.</td></tr>
     <tr><td class="k">fx_protocol.h</td><td>The three loop commands and their payloads, size-pinned so a padding difference is a build error.</td></tr>
   </tbody>
 </table>
@@ -774,7 +774,7 @@ slot   5632 KiB     = <b>5 767 168</b>  = 11 x 2^19
 
 <p>51% sustained would have been a cliff back when it only happened during a transfer, coinciding with the DSP at full tilt and both SDRAM banks serving a looper alongside delay or reverb. Fixed, it is simply the operating point: nothing changes when a loop starts, so there is no transient to survive.</p>
 
-<p>Notice the width column is not a free choice: only 8, 16 and 32 appear because those are the widths that divide the receiver's 4096-word half. 20 and 24 are missing because they do not, and a frame that does not divide puts the half-transfer interrupt in the middle of a frame. An earlier version of this design shipped with 20.</p>
+<p>Notice the width column is not a free choice. 20 and 24 are missing because they do not divide the receiver's 4096-word half, and a frame that does not divide puts the half-transfer interrupt in the middle of a frame — an earlier version of this design shipped with 20. 64 divides and is missing for the other reason: at 12.288 MB/s it is 102% of the link even at 96 MHz.</p>
 </div>
 </section>
 
@@ -837,7 +837,7 @@ slot   5632 KiB     = <b>5 767 168</b>  = 11 x 2^19
 
 <pre>loop A writes  ──────────────▶ <b>done</b>
                                  │
-recorder waits, ring filling ────┤  <span class="c">backlog: ~3 MB of a 50 MB ring</span>
+recorder waits, ring filling ────┤  <span class="c">backlog: ~3 MB of a 4 MiB ring</span>
                                  ▼
                           <b>RECORDER GOES NEXT</b>   <span class="c">even though loop B is queued</span>
                                  │
@@ -858,7 +858,7 @@ It never blinks false in the gaps.</pre>
 <div class="review">
   <div class="tag"><span class="id">R2</span> worth measuring</div>
   <h4>The CRC and the packing both sit in the audio block</h4>
-  <p>Per block, with a transfer running, the audio side spends roughly <strong>2.6–5%</strong> of its budget on the CRC over 4096 loop bytes, plus the window copies. That is affordable. It is listed because it is <em>invisible</em> — nothing reports it, and it only appears when a loop transfer coincides with a heavy patch.</p>
+  <p>Per block, with a transfer running, the audio side spends roughly <strong>3.5–7%</strong> of its budget on the CRC over 5 632 loop bytes, plus the window copies. That is affordable. It is listed because it is <em>invisible</em> — nothing reports it, and it only appears when a loop transfer coincides with a heavy patch.</p>
   <p><strong>Worth doing:</strong> put the block's worst-case cycle count on the debug UART. You already have <code>DWT-&gt;CYCCNT</code> sampled in <code>ProcessHalf</code>.</p>
 </div>
 </section>
@@ -898,7 +898,7 @@ iface  (slave)    DMA_CIRCULAR   TSIZE = 0      one endless transfer, armed once
 <div class="review crit">
   <div class="tag"><span class="id">R8</span> open · needs an oscilloscope · could rotate the stream</div>
   <h4>NSS deasserts between bursts, and the slave is inside one endless transfer</h4>
-  <p>This falls straight out of R7. The master drives <code>SPI_NSS_HARD_OUTPUT</code>, so its peripheral asserts NSS when a burst begins and releases it at EOT — low, high, low, high, once per burst, every 1.33 ms. The slave is <code>SPI_NSS_HARD_INPUT</code> and believes it is inside a single transfer that runs for the life of the device.</p>
+  <p>This falls straight out of R9. The master drives <code>SPI_NSS_HARD_OUTPUT</code>, so its peripheral asserts NSS when a burst begins and releases it at EOT — low, high, low, high, once per burst, every 1.33 ms. The slave is <code>SPI_NSS_HARD_INPUT</code> and believes it is inside a single transfer that runs for the life of the device.</p>
   <p><strong>The question.</strong> When the slave's NSS input goes high between bursts, does it (a) pause and resume cleanly on the next burst, or (b) treat it as end-of-transfer and tear down, error, or reset its internal word counter?</p>
   <p>If (b), the endless transfer either dies after the first burst or resynchronises its counter so each burst lands at a different phase — a permanent silent rotation, which is the failure this entire frame design exists to catch. It <em>would</em> be caught. You would simply have a link that reports faults continuously and records nothing.</p>
   <p><strong>What to discount.</strong> An earlier review flagged <code>SPI_NSS_PULSE_ENABLE</code> on the master — NSS pulsing between every individual word — as the danger. That should not fire: <code>CFG2.SSOM</code> only interleaves those pulses when <code>MIDI &gt; 1</code>, and <code>MasterInterDataIdleness</code> is <code>00CYCLE</code> here. Right instinct, wrong mechanism. The exposure is between <em>bursts</em>, not between words.</p>
@@ -933,7 +933,7 @@ and the file advances <b>4× faster than real time</b></pre>
 it would have read 1024 × 20 × 4 = <b>81,920 B</b>
 from a half that holds <b>16,384 B</b></pre>
   <p>A five-times overrun into whatever follows the ring, the first time a loop was saved. <code>LoopSession_FillTx</code>'s half offset had the same bug.</p>
-  <p><strong>First fix</strong> made frames-per-half a function of the ACKed width, required that width to divide the half, and refused an illegal one rather than clamping. That was correct but left the width variable, which is what R6 then tripped over.</p>
+  <p><strong>First fix</strong> made frames-per-half a function of the ACKed width, required that width to divide the half, and refused an illegal one rather than clamping. That was correct but left the width variable, which is what R10 then tripped over.</p>
   <p><strong>Final fix:</strong> the frame is fixed at 32, so frames-per-half is simply a constant:</p>
 <pre><b>REC_RX_HALF_WORDS</b>     (REC_RX_WORDS / 2)          <span class="c">4096</span>
 <b>REC_FRAMES_PER_HALF</b>   (REC_RX_HALF_WORDS / 32)    <span class="c">128</span></pre>
@@ -986,14 +986,14 @@ block budget        = 639,840 cycles      <b>≈ 13%</b></pre>
   <p><code>MDMA_Trigger_Deinterleave</code> recomputes all nine routes and runs <code>FxInterleave_Xfer</code>'s full validation on each, now every <strong>2.67 ms</strong> rather than every 1333 µs.</p>
   <p><strong>The previous verdict here was "leave it",</strong> and the reason was that caching needs invalidation, and the thing that would invalidate it — a width change — is exactly the moment you least want a stale descriptor. <strong>Width changes no longer exist.</strong> Eight of the nine routes are now genuinely constant for the life of the link: same slots, same widths, same frame count. Only the destination offsets move, by one chunk each time, and only the loop route appears and disappears.</p>
   <p><strong>What to do:</strong> build the four recorder routes once at init and patch only <code>CDAR</code> per half. The validation still runs at init, where it belongs. This is no longer a trade against safety — the fixed frame removed the hazard that made caching risky — so it is simply a saving now.</p>
-  <p><strong>Also new, and cheap:</strong> the sync scan adds 128 uncached word reads per half. RAM_D2 is non-cacheable, so roughly 2–3 k cycles at 2.67 ms intervals — about 0.2% of one core. Worth knowing about, not worth avoiding: it is what buys R7's whole class of fault becoming visible.</p>
+  <p><strong>Also new, and cheap:</strong> the sync scan adds 128 uncached word reads per half. RAM_D2 is non-cacheable, so roughly 2–3 k cycles at 2.67 ms intervals — about 0.2% of one core. Worth knowing about, not worth avoiding: it is what buys R9's whole class of fault becoming visible.</p>
 </div>
 
 <div class="review">
   <div class="tag"><span class="id">R6</span> smell · justified, but flag it</div>
   <h4><code>RecStream_StageSlots()</code> hands out a writable pointer</h4>
   <p><code>RecStream_Buffer</code> returns <code>const</code> because nothing outside that module should write a staged block. <code>StageSlots</code> exists to break exactly that rule, so the loop transport can fill its slots in place.</p>
-  <p>The alternative is a second 5 KiB buffer and a copy per block. That is worse. But the const-breaking function is a genuine smell and should stay narrow: it is valid only for the half <code>Stage</code> just returned, and only before the transport starts. Nothing enforces that today.</p>
+  <p>The alternative is a second 8 KiB buffer and a copy per block. That is worse. But the const-breaking function is a genuine smell and should stay narrow: it is valid only for the half <code>Stage</code> just returned, and only before the transport starts. Nothing enforces that today.</p>
   <p><strong>Cheap hardening:</strong> have <code>Stage</code> return the writable pointer directly instead of an index, so there is no window in which a stale index can be passed.</p>
 </div>
 
@@ -1003,7 +1003,7 @@ block budget        = 639,840 cycles      <b>≈ 13%</b></pre>
   <p><strong>Two staging halves on the audio side.</strong> One in flight, one filling. With one, a block would be written into the buffer the DMA is reading.</p>
   <p><strong>The DTCM window in <code>loop_mem</code>.</strong> Looks like a leftover from the PSRAM design. It is not: it handles the loop wrap in one place, and DTCM is zero-wait where SDRAM costs a row activate per sample.</p>
   <p><strong>Zeroing the loop slots when no transfer runs.</strong> Without it a finished transfer's last block stays in the staging buffer and the next frame carries stale audio in slots the interface is still routing.</p>
-  <p><strong>Two CRCs.</strong> They are over different memories — the sender's looper and the receiver's staging. Comparing them is the only check on a link that carries no CRC of its own.</p>
+  <p><strong>Two CRCs.</strong> They are over different memories — the sender's looper and the receiver's staging. The frame proves the payload arrived in order; the CRCs prove it arrived intact. Neither substitutes for the other.</p>
 </div>
 </section>
 
