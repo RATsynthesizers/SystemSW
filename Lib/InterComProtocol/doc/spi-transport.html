@@ -435,7 +435,7 @@ slot   5632 KiB     = <b>5 767 168</b>  = 11 x 2^19
 
 <p>The price is 22 slots of zeros on an idle link: 4.2 MB/s of the 12 available, spent to delete a failure mode. A fixed width also makes the receiver's geometry a compile-time constant — 128 frames per half, not a division by a number that arrived in a handshake.</p>
 
-<p><strong>Thirty-two, and not any number you like.</strong> Two constraints meet here. The width must divide the receiver's 4096-word half, or the half-transfer interrupt lands mid-frame and everything after it is rotated — that admits 8, 16, 32 and 64. And the burst must fit inside the block: 64 slots would be 12.288 MB/s, <strong>102% of a 96 MHz link</strong>, so it cannot be sent at all. Thirty-two is the widest that satisfies both, which makes the loop as fast as the wire allows.</p>
+<p><strong>Thirty-two, and not any number you like.</strong> Two limits bound it from opposite sides. The link carries <strong>12.0 MB/s</strong> — 96 MHz of 32-bit words — and a frame costs 192 kB/s per slot, so <strong>32 slots is the widest the wire can carry at all</strong>: 6.144 MB/s, half the budget. And the width must divide the receiver's 4096-word half, or the half-transfer interrupt lands mid-frame and everything after it is rotated. Of the widths the wire can carry, 8, 16 and 32 divide; 20 and 24 do not. Thirty-two is the largest that satisfies both.</p>
 
 <p>The five regions of the frame are read completely differently, and that difference explains most of the code:</p>
 </div>
@@ -765,16 +765,16 @@ slot   5632 KiB     = <b>5 767 168</b>  = 11 x 2^19
 </div>
 
 <pre>frame width          <span class="c">48 MHz    96 MHz</span>   <span class="c">share of the 1333 µs block</span>
- 8  <span class="s">1</span>+<span class="r">4</span>+<span class="l">3 loop</span>          26%       13%     <span class="c">divides the half</span>
-16  <span class="s">1</span>+<span class="r">4</span>+<span class="l">11 loop</span>         51%       26%     <span class="c">divides the half</span>
-32  <span class="s">1</span>+<span class="r">4</span>+<span class="v">4 live</span>+<span class="t">1</span>+<span class="l">22 file</span>  <b>102%</b>       <b>51%</b>     <span class="c">divides — IN USE, and 48 MHz cannot fit it</span></pre>
+ 8   <span class="c">too narrow for the layout</span>      26%       13%     <span class="c">divides, but 1+4+4+1 leaves 0 file slots</span>
+16  <span class="s">1</span>+<span class="r">4</span>+<span class="v">4</span>+<span class="t">1</span>+<span class="l">6 file</span>       51%       26%     <span class="c">divides; a save would take 5.0 s</span>
+32  <span class="s">1</span>+<span class="r">4</span>+<span class="v">4</span>+<span class="t">1</span>+<span class="l">22 file</span>     <b>102%</b>       <b>51%</b>     <span class="c">divides — IN USE, and 48 MHz cannot clock it</span></pre>
 
 <div class="col">
 <p><strong>This table is why the link runs at 96 MHz.</strong> The chosen frame does not fit in a block at 48 MHz at all — 102% of the budget — so the clock is not headroom for its own sake, it is what makes a 32-slot frame possible. At 96 MHz the same frame leaves half of every block free, and it is a <em>constant</em> half rather than a figure that jumps when a transfer starts.</p>
 
 <p>51% sustained would have been a cliff back when it only happened during a transfer, coinciding with the DSP at full tilt and both SDRAM banks serving a looper alongside delay or reverb. Fixed, it is simply the operating point: nothing changes when a loop starts, so there is no transient to survive.</p>
 
-<p>Notice the width column is not a free choice. 20 and 24 are missing because they do not divide the receiver's 4096-word half, and a frame that does not divide puts the half-transfer interrupt in the middle of a frame — an earlier version of this design shipped with 20. 64 divides and is missing for the other reason: at 12.288 MB/s it is 102% of the link even at 96 MHz.</p>
+<p>Notice the width column is not a free choice. Nothing wider than 32 appears because nothing wider fits: the link is 12.0 MB/s and each slot costs 192 kB/s, so 32 slots already spends half of it and 64 would need more than the wire has. Within what fits, 20 and 24 are missing because they do not divide the receiver's 4096-word half, and a frame that does not divide puts the half-transfer interrupt in the middle of a frame — an earlier version of this design shipped with 20.</p>
 </div>
 </section>
 
